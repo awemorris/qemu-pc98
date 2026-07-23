@@ -5,6 +5,10 @@ config I8259
     bool
     select ISA_BUS
 
+config PC98_I8259
+    bool
+    select I8259 # reuses the shared TYPE_I8259 device with PC-98 wiring
+
 config PL190
     bool
 

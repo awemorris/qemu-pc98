@@ -1,0 +1,108 @@
+NEC PC-9821 machine (``pc98``)
+==============================
+
+The ``pc98`` machine models a NEC PC-9821, the 32-bit member of the PC-98
+family of Japanese personal computers.  It boots the machine's own ROM BIOS
+(ITF + BIOS) and runs PC-98 MS-DOS and PC-98 applications.
+
+The PC-98 is x86-based but is **not** a PC/AT compatible: the interrupt
+controller cascade, the timer clock, the I/O port map, the A20 behaviour, the
+disk BIOS geometry and the text/graphics hardware all differ from the AT.  The
+machine therefore derives from ``TYPE_X86_MACHINE`` directly rather than from
+the PC/AT board code, and its devices live in their own files.
+
+## Firmware
+
+The machine needs the target ROM images, which are not shipped with QEMU.
+Point ``-L`` at a directory containing them.  Either layout is accepted:
+
+* one file per 32 KiB ROM bank: ``pc98bank0.bin`` .. ``pc98bank7.bin``; or
+* the split dumps ``pc98itf.bin`` (32 KiB) and ``pc98bios.bin`` (96 KiB).
+
+The ITF and the three main BIOS banks are mandatory; ``pc98pci.bin`` and
+``pc98ide.bin`` are optional.  The text font ``pc98font.bin`` is required for
+display output.
+
+Note
+----
+
+The high-resolution timer that later PC-9821 models expose (a free-running
+1/32-second counter kept in the BIOS work area) is **not implemented yet**.  A
+**PC-9801 BIOS** image should therefore be used; a PC-9821 BIOS that depends
+on this timer may not run correctly for now.
+
+Running
+-------
+
+With the firmware in ``<romdir>`` and a bootable floppy image::
+
+```
+qemu-system-i386 -M pc98 -L <romdir> -drive if=floppy,format=raw,file=dos.img
+```
+
+```
+ls roms
+pc98bios.bin  pc98font.bin  pc98ide.bin  pc98itf.bin
+```
+
+Supported devices
+-----------------
+
+* One 486-class CPU (uniprocessor).
+* Interrupt controllers: a master/slave 8259A pair with the cascade on IRQ 7
+  (the PC/AT uses IRQ 2), reachable at the stride-2 PC-98 ports.
+* Interval timer: 8253/8254 clocked at 2.4576 MHz.
+* DMA: a single 8237-style controller with the PC-98 page/bank-boundary and
+  1 MiB-wrap semantics.
+* Keyboard: 8251-style serial keyboard on IRQ 1.
+* System port: uPD4990A calendar clock (IRQ 15), the system and printer 8255
+  PPIs, a time-stamp counter and the software DIP switches.
+* Floppy: uPD765A controller with the 1 MB (IRQ 11, DMA 2) and 640 KB
+  (IRQ 10, DMA 3) interfaces; 1.2 MB (1024-byte sector) 2HD media.
+* Built-in IDE (IRQ 9): two channels multiplexed onto one register block,
+  addressed with the PC-98 fixed 8-head / 17-sector BIOS geometry.
+* Display: uPD7220 (GDC) text and graphics with the GRCG, EGC and PEGC
+  blitters, and the 8/16-colour planar and 256-colour packed modes.
+
+Disks
+-----
+
+Floppies use the usual ``if=floppy`` interface::
+
+```
+qemu-system-i386 -M pc98 -L <romdir> -drive if=floppy,format=raw,file=dos.img
+```
+
+Hard disks use the PC-98-specific ``if=ide98`` interface.  This keeps the
+PC-98 IDE out of QEMU's generic geometry auto-detection: the PC-98 IDE BIOS
+always addresses a disk as 8 heads / 17 sectors per track, so images must be
+partitioned for that geometry::
+
+```
+qemu-system-i386 -M pc98 -L <romdir> -drive if=ide98,format=raw,file=hdd.raw
+```
+
+A host directory can be exposed as a PC-98-formatted read/write FAT disk with
+the ``fat98`` block driver (a PC-98 variant of ``fat:``)::
+
+```
+qemu-system-i386 -M pc98 -L <romdir> -drive if=ide98,unit=1,format=raw,file=fat98:rw:/path/to/dir
+```
+
+Limitations
+-----------
+
+Not yet implemented:
+
+- sound
+- bus mouse
+- serial ports
+- networking
+- EMS
+- high-resolution timer (see the firmware note above)
+- migration/savevm
+- SMP
+- WAB linear-framebuffer
+
+The Window Accelerator Board (WAB) linear-framebuffer device is planned for
+later.

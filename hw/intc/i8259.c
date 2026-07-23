@@ -34,7 +34,6 @@
 
 /*#define DEBUG_IRQ_LATENCY*/
 
-#define TYPE_I8259 "isa-i8259"
 typedef struct PICClass PICClass;
 DECLARE_CLASS_CHECKERS(PICClass, PIC,
                        TYPE_I8259)
@@ -53,7 +52,8 @@ struct PICClass {
 static int64_t irq_time[16];
 #endif
 PICCommonState *isa_pic;
-static PICCommonState *slave_pic;
+/* exported (like isa_pic) so the PC-98 variant can wire its own slave */
+PICCommonState *slave_pic;
 
 /* return the highest priority found in mask (highest = smallest
    number). Return 8 if no irq */
@@ -89,7 +89,7 @@ static int pic_get_irq(PICCommonState *s)
         mask &= ~s->imr;
     }
     if (s->special_fully_nested_mode && s->master) {
-        mask &= ~(1 << 2);
+        mask &= ~(1 << s->cascade_irq);
     }
     cur_priority = get_priority(s, mask);
     if (priority < cur_priority) {
@@ -178,7 +178,7 @@ int pic_read_irq(PICCommonState *s)
     if (irq >= 0) {
         int irq2;
 
-        if (irq == 2) {
+        if (irq == s->cascade_irq) {
             irq2 = pic_get_irq(slave_pic);
             if (irq2 >= 0) {
                 pic_intack(slave_pic, irq2);

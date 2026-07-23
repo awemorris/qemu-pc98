@@ -118,6 +118,20 @@ config Q35
     select SMBIOS
     select FW_CFG_DMA
 
+config PC98
+    bool
+    default y
+    depends on I386
+    select ISA_BUS
+    select PC98_I8259
+    select PC98_PIT
+    select PC98_SYS
+    select PC98_VGA
+    select PC98_DMA
+    select PC98_KBD
+    select PC98_FDC
+    select PC98_IDE
+
 config MICROVM
     bool
     default y

@@ -71,6 +71,7 @@ if get_option('bochs').allowed()
 endif
 if get_option('vvfat').allowed()
   block_ss.add(files('vvfat.c'))
+  block_ss.add(files('vvfat98.c'))
 endif
 if get_option('dmg').allowed()
   block_ss.add(files('dmg.c'))

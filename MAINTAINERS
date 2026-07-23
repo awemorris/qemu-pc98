@@ -2063,6 +2063,32 @@ F: hw/i386/microvm.c
 F: include/hw/i386/microvm.h
 F: pc-bios/bios-microvm.bin
 
+NEC PC-9821 (pc98)
+M: Awe Morris <awe@suika3.vn>
+S: Maintained
+F: docs/system/i386/pc98.rst
+F: docs/pc98-*.md
+F: hw/i386/pc98.c
+F: hw/i386/pc98-mem.c
+F: hw/misc/pc98-sys.c
+F: hw/input/pc98-kbd.c
+F: hw/intc/i8259-pc98.c
+F: hw/timer/i8254-pc98.c
+F: hw/dma/pc98-dma.c
+F: hw/block/pc98-fdc.c
+F: hw/ide/pc98-ide.c
+F: hw/display/pc98-vga.c
+F: block/vvfat98.c
+F: include/hw/i386/pc98.h
+F: include/hw/misc/pc98-sys.h
+F: include/hw/input/pc98-kbd.h
+F: include/hw/intc/i8259-pc98.h
+F: include/hw/timer/i8254-pc98.h
+F: include/hw/dma/pc98-dma.h
+F: include/hw/block/pc98-fdc.h
+F: include/hw/ide/pc98-ide.h
+F: include/hw/display/pc98-vga.h
+
 nitro-enclave
 M: Alexander Graf <graf@amazon.com>
 M: Dorjoy Chowdhury <dorjoychy111@gmail.com>

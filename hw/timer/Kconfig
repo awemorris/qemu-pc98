@@ -23,6 +23,11 @@ config I8254
     bool
     depends on ISA_BUS
 
+config PC98_PIT
+    bool
+    depends on ISA_BUS
+    select I8254 # for the shared TYPE_PIT_COMMON base class
+
 config ALLWINNER_A10_PIT
     bool
     select PTIMER

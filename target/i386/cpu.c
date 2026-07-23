@@ -9400,7 +9400,8 @@ static void x86_cpu_reset_hold(Object *obj, ResetType type)
     env->hflags &= ~HF_GUEST_MASK;
 
     cpu_x86_update_cr0(env, 0x60000010);
-    env->a20_mask = ~0x0;
+    /* PC-98 comes out of reset with the whole address space wrapped at 1MiB */
+    env->a20_mask = cpu->pc98_a20_mask ? 0xfffff : ~0x0;
     env->smbase = 0x30000;
     env->msr_smi_count = 0;
 
@@ -10790,6 +10791,7 @@ static const Property x86_cpu_properties[] = {
 
     DEFINE_PROP_BOOL("check", X86CPU, check_cpuid, true),
     DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
+    DEFINE_PROP_BOOL("pc98-a20-mask", X86CPU, pc98_a20_mask, false),
     DEFINE_PROP_BOOL("x-force-features", X86CPU, force_features, false),
     DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
     DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),

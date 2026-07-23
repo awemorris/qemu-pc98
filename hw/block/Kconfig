@@ -10,6 +10,11 @@ config FDC_SYSBUS
     bool
     select FDC
 
+config PC98_FDC
+    bool
+    depends on ISA_BUS
+
+
 config SSI_M25P80
     bool
 

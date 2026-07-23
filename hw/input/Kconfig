@@ -6,6 +6,10 @@ config PCKBD
     select PS2
     depends on ISA_BUS
 
+config PC98_KBD
+    bool
+    depends on ISA_BUS
+
 config PL050
     bool
     select PS2

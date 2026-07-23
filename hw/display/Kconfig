@@ -53,6 +53,10 @@ config VGA_ISA
     depends on ISA_BUS
     select VGA
 
+config PC98_VGA
+    bool
+    depends on ISA_BUS
+
 config VGA_MMIO
     bool
     select VGA

@@ -81,7 +81,9 @@ static void pic_common_realize(DeviceState *dev, Error **errp)
     PICCommonState *s = PIC_COMMON(dev);
     ISADevice *isa = ISA_DEVICE(dev);
 
-    isa_register_ioport(isa, &s->base_io, s->iobase);
+    if (s->iobase != -1) {
+        isa_register_ioport(isa, &s->base_io, s->iobase);
+    }
     if (s->elcr_addr != -1) {
         isa_register_ioport(isa, &s->elcr_io, s->elcr_addr);
     }
@@ -197,6 +199,7 @@ static const Property pic_properties_common[] = {
     DEFINE_PROP_UINT32("iobase", PICCommonState, iobase,  -1),
     DEFINE_PROP_UINT32("elcr_addr", PICCommonState, elcr_addr,  -1),
     DEFINE_PROP_UINT8("elcr_mask", PICCommonState, elcr_mask,  -1),
+    DEFINE_PROP_UINT8("cascade-irq", PICCommonState, cascade_irq, 2),
     DEFINE_PROP_BIT("master", PICCommonState, master,  0, false),
 };
 

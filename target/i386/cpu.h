@@ -2358,6 +2358,12 @@ struct ArchCPU {
     bool check_cpuid;
     bool enforce_cpuid;
     /*
+     * NEC PC-98 A20 semantics: when the A20 gate is disabled, the whole
+     * physical address space wraps at 1 MiB (mask 0xfffff) instead of
+     * only masking address bit 20 as on AT-compatibles.
+     */
+    bool pc98_a20_mask;
+    /*
      * Force features to be enabled even if the host doesn't support them.
      * This is dangerous and should be done only for testing CPUID
      * compatibility.

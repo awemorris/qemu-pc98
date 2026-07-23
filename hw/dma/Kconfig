@@ -14,6 +14,10 @@ config I82374
 config I8257
     bool
 
+config PC98_DMA
+    bool
+    depends on ISA_BUS
+
 config ZYNQ_DEVCFG
     bool
     select REGISTER

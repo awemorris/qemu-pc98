@@ -3,9 +3,12 @@
 
 /* i8259.c */
 
+#define TYPE_I8259 "isa-i8259"
+
 typedef struct PICCommonState PICCommonState;
 
 extern PICCommonState *isa_pic;
+extern PICCommonState *slave_pic;
 
 /*
  * i8259_init()

@@ -84,6 +84,7 @@ static const char *const if_name[IF_COUNT] = {
     [IF_SD] = "sd",
     [IF_VIRTIO] = "virtio",
     [IF_XEN] = "xen",
+    [IF_IDE98] = "ide98",
 };
 
 static int if_max_devs[IF_COUNT] = {
@@ -103,6 +104,7 @@ static int if_max_devs[IF_COUNT] = {
      */
     [IF_IDE] = 2,
     [IF_SCSI] = 7,
+    [IF_IDE98] = 2,             /* PC-98 IDE: 2 units per bank */
 };
 
 /**
@@ -948,7 +950,7 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
     if (qemu_opts_id(all_opts) == NULL) {
         char *new_id;
         const char *mediastr = "";
-        if (type == IF_IDE || type == IF_SCSI) {
+        if (type == IF_IDE || type == IF_SCSI || type == IF_IDE98) {
             mediastr = (media == MEDIA_CDROM) ? "-cd" : "-hd";
         }
         if (max_devs) {
