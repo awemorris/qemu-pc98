@@ -1025,6 +1025,7 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
 
     switch(type) {
     case IF_IDE:
+    case IF_IDE98:
     case IF_SCSI:
     case IF_XEN:
     case IF_NONE:

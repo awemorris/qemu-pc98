@@ -28,6 +28,11 @@ config CS4231A
     default y
     depends on ISA_BUS
 
+config PC98_WSS
+    bool
+    depends on ISA_BUS
+    select CS4231A
+
 config HDA
     bool
     default y if PCI_DEVICES

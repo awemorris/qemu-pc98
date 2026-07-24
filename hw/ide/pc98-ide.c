@@ -7,18 +7,20 @@
  * PC-98 support modernisation
  *   Copyright (c) 2026 Awe Morris
  *
+ * This device is derived from the PC-98 model in the QEMU/9821 fork
+ * (GPL, by TAKEDA toshiya) and has been reimplemented and
+ * restructured for modern QEMU.  Its register-level behaviour was
+ * cross-checked against the Neko Project II and NP21W emulators.
+ *
  * The PC-98 built-in IDE has two "banks" (each an ATA channel with a
  * master/slave pair) multiplexed onto one register block: port
  * 0x430/0x432 selects the active bank, and the command block lives at
  * 0x640-0x64e with a 2-byte stride, control/status at 0x74c/0x74e.
  * It reuses the shared IDE core (register handlers take an IDEBus
  * opaque) but wires the PC-98 port map itself, so the PC/AT ISA IDE
- * model stays untouched.
- *
- * This device is derived from the PC-98 model in the QEMU/9821 fork (GPL,
- * by TAKEDA toshiya) and has been reimplemented and restructured for modern
- * QEMU.  Its register-level behaviour was cross-checked against the Neko
- * Project II and NP21W emulators.
+ * model stays untouched.  Both ATA hard disks and ATAPI CD-ROMs are
+ * supported (the shared core provides the ATAPI PACKET machinery);
+ * a CD-ROM is attached with, e.g., -drive if=ide98,media=cdrom.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -87,10 +89,17 @@ static uint32_t pc98_ide_chsel_read(void *opaque, uint32_t addr)
  * times out.  Re-assert DSC on reads whenever the drive is ready and idle;
  * this turns 0x40 into 0x50 while leaving DRQ/BSY/error states untouched.
  * Kept here so the shared IDE core is not modified.
+ *
+ * This is only correct for ATA hard disks.  On an ATAPI (CD-ROM) device the
+ * DSC bit is command-specific, so the fixup is restricted to a real IDE_HD on
+ * the active unit; ATAPI status is passed through unchanged.
  */
-static inline uint32_t pc98_ide_fixup_status(uint32_t st)
+static inline uint32_t pc98_ide_fixup_status(IDEBus *bus, uint32_t st)
 {
-    if ((st & (BUSY_STAT | READY_STAT)) == READY_STAT) {
+    IDEState *active = &bus->ifs[bus->unit];
+
+    if (active->blk && active->drive_kind == IDE_HD &&
+        (st & (BUSY_STAT | READY_STAT)) == READY_STAT) {
         st |= SEEK_STAT;
     }
     return st;
@@ -128,7 +137,7 @@ static uint32_t pc98_ide_cmd_read(void *opaque, uint32_t addr)
     }
     ret = ide_ioport_read(s->cur_bus, reg);
     if (reg == 7) {
-        ret = pc98_ide_fixup_status(ret);
+        ret = pc98_ide_fixup_status(s->cur_bus, ret);
     }
     return ret;
 }
@@ -176,7 +185,7 @@ static uint32_t pc98_ide_status_read(void *opaque, uint32_t addr)
     if (pc98_ide_bus_empty(s->cur_bus)) {
         return 0xff;
     }
-    return pc98_ide_fixup_status(ide_status_read(s->cur_bus, 0));
+    return pc98_ide_fixup_status(s->cur_bus, ide_status_read(s->cur_bus, 0));
 }
 
 /*
@@ -314,7 +323,8 @@ static void pc98_ide_set_geometry(IDEState *ide)
 {
     int cyls;
 
-    if (!ide->blk || ide->nb_sectors == 0) {
+    /* ATAPI (CD-ROM) devices have no fixed C/H/S geometry; leave them alone. */
+    if (!ide->blk || ide->drive_kind != IDE_HD || ide->nb_sectors == 0) {
         return;
     }
 

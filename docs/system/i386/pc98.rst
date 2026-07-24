@@ -89,6 +89,20 @@ the ``fat98`` block driver (a PC-98 variant of ``fat:``)::
 qemu-system-i386 -M pc98 -L <romdir> -drive if=ide98,unit=1,format=raw,file=fat98:rw:/path/to/dir
 ```
 
+An ATAPI CD-ROM is attached to the same ``if=ide98`` interface with
+``media=cdrom``.  The interface has two channels of two units each; placing
+the CD-ROM on the second channel (``bus=1``) leaves the first channel for the
+boot hard disk::
+
+```
+qemu-system-i386 -M pc98 -L <romdir> \
+    -drive if=ide98,bus=0,unit=0,format=raw,file=hdd.raw \
+    -drive if=ide98,bus=1,unit=0,media=cdrom,file=disc.iso
+```
+
+This is enough to install, for example, FreeBSD 8.4/pc98 from its release
+CD-ROM: the ATAPI drive appears to the guest as ``acd0``.
+
 Limitations
 -----------
 

@@ -76,6 +76,10 @@ config NE2000_ISA
     depends on ISA_BUS
     select NE2000_COMMON
 
+config PC98_LGY98
+    bool
+    select NE2000_COMMON
+
 config OPENCORES_ETH
     bool
 

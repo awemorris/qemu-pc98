@@ -129,8 +129,16 @@ config PC98
     select PC98_VGA
     select PC98_DMA
     select PC98_KBD
+    select PC98_MOUSE
     select PC98_FDC
     select PC98_IDE
+    select PC98_WAB
+    select PC98_LGY98
+    select PC98_WSS
+    select VGA
+
+config PC98_WAB
+    bool
 
 config MICROVM
     bool

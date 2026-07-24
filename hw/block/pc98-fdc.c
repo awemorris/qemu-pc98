@@ -1153,7 +1153,7 @@ static bool fdc_reset_sensei_needed(void *opaque)
 }
 
 static const VMStateDescription vmstate_fdc_reset_sensei = {
-    .name = "fdc/reset_sensei",
+    .name = "pc98-fdc-core/reset_sensei",
     .version_id = 1,
     .minimum_version_id = 1,
     .needed = fdc_reset_sensei_needed,
@@ -1171,7 +1171,7 @@ static bool fdc_result_timer_needed(void *opaque)
 }
 
 static const VMStateDescription vmstate_fdc_result_timer = {
-    .name = "fdc/result_timer",
+    .name = "pc98-fdc-core/result_timer",
     .version_id = 1,
     .minimum_version_id = 1,
     .needed = fdc_result_timer_needed,
@@ -1189,7 +1189,7 @@ static bool fdc_phase_needed(void *opaque)
 }
 
 static const VMStateDescription vmstate_fdc_phase = {
-    .name = "fdc/phase",
+    .name = "pc98-fdc-core/phase",
     .version_id = 1,
     .minimum_version_id = 1,
     .needed = fdc_phase_needed,

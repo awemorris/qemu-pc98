@@ -34,17 +34,21 @@
 #include "hw/core/cpu.h"
 #include "hw/core/irq.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/audio/pc98-wss.h"
 #include "hw/block/pc98-fdc.h"
 #include "hw/display/pc98-vga.h"
+#include "hw/display/pc98-wab.h"
 #include "hw/dma/pc98-dma.h"
 #include "hw/i386/pc98.h"
 #include "hw/ide/pc98-ide.h"
 #include "hw/ide/ide-bus.h"
 #include "hw/input/pc98-kbd.h"
+#include "hw/input/pc98-mouse.h"
 #include "hw/i386/x86.h"
 #include "hw/intc/i8259-pc98.h"
 #include "hw/isa/isa.h"
 #include "hw/misc/pc98-sys.h"
+#include "hw/net/pc98-lgy98.h"
 #include "hw/timer/i8254-pc98.h"
 #include "system/address-spaces.h"
 #include "system/ioport.h"
@@ -259,6 +263,9 @@ static void pc98_devices_init(Pc98MachineState *pms)
         qdev_connect_gpio_out(DEVICE(kbd), 0, x86ms->gsi[1]);
     }
 
+    /* bus mouse (uPD8255 PPI at 0x7fd9-0x7fdf, IRQ13) */
+    pc98_mouse_init(isa_bus, x86ms->gsi[13]);
+
     /* floppy controller (1MB I/F IRQ11/DMA2, 640KB I/F IRQ10/DMA3) */
     {
         DriveInfo *fd[MAX_FD];
@@ -302,6 +309,20 @@ static void pc98_devices_init(Pc98MachineState *pms)
                              machine->ram, machine->ram_size, &vga_regions,
                              pms->ide ? pc98_ide_connected(pms->ide) : 0,
                              pc98_vga_select_ems, pms->vga);
+
+    /* Window Accelerator Board (Cirrus GD5426 behind the NEC LSI) */
+    pc98_wab_init(isa_bus);
+
+    /* LGY-98 C-bus Ethernet (NE2000-compatible, IRQ6) */
+    pc98_lgy98_init(isa_bus, x86ms->gsi[6]);
+
+    /*
+     * Built-in WSS / Mate-X PCM (CS4231A codec, IRQ12/DMA1).  Both resolve
+     * through the ISA bus: isa_bus_register_input_irqs() above wires the
+     * i8259 inputs (so IRQ12 -> gsi[12]) and pc98_dma_init() registered the
+     * PC-98 DMA controller.
+     */
+    pc98_wss_init(isa_bus);
 
     /* board ports: A20 gate, software reset, and firmware straps */
     portio_list_init(&pms->portio_list, OBJECT(pms), pc98_board_ports,
