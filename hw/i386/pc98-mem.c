@@ -172,11 +172,13 @@ static void mem_apply_window(Pc98MemState *s, int idx)
 
     memory_region_set_alias_offset(&w->ram, val * 0x10000);
 
-    /* val 0x0a: text+planar VRAM window; val 0x0e: 0xe0000 VRAM window */
+    /*
+     * B/R/G + Intensity planar VRAM window at the window base. 
+     */
     memory_region_set_enabled(&w->tvram, val == 0x0a);
     memory_region_set_enabled(&w->vram_a8000, val == 0x0a);
     memory_region_set_enabled(&w->vram_b0000, val == 0x0a);
-    memory_region_set_enabled(&w->vram_e0000, val == 0x0e);
+    memory_region_set_enabled(&w->vram_e0000, val == 0x0a || val == 0x0e);
 
     memory_region_transaction_commit();
 }
@@ -697,7 +699,8 @@ static void mem_build_window(Pc98MemState *s, int idx, hwaddr base,
 
     memory_region_init_alias(&w->vram_e0000, NULL, "pc98.win-vram-e0000",
                              vga->vram_e0000, 0, 0x8000);
-    memory_region_add_subregion_overlap(&s->lowmem, base, &w->vram_e0000, 1);
+    memory_region_add_subregion_overlap(&s->lowmem, base + 0x40000,
+                                        &w->vram_e0000, 1);
     memory_region_set_enabled(&w->vram_e0000, false);
 }
 
