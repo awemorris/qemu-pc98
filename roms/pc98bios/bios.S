@@ -2,6 +2,7 @@
  * Minimal PC-9821 BIOS / Main BIOS banks.
  * Copyright (C) 2026 Awe Morris
  * Copyright (C) 2026 drachen6jp
+ * Copyright (C) 2026 NeoClassic Tech. (neoct@github)
  *
  * The combined image occupies banks 5-7 (E8000h-FFFFFh).  The ITF enters
  * FD80:0002 after paging bank 7 into the top window.  This first stage
@@ -2938,8 +2939,7 @@ fdd_boot:
 	jc	fdd_boot_failed
 
 fdd_boot_12m_loaded:
-	cmpw	$0xaa55, %es:510
-	jne	fdd_boot_failed
+	/* PC-98 1.2-MiB IPLs do not require the IBM-PC 55AA signature. */
 	xorw	%ax, %ax
 	movw	%ax, %ds
 	movb	$0x90, BOOT_DEVICE
