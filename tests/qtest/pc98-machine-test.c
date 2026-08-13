@@ -90,6 +90,11 @@
 
 #define PC98_SYS16M_CTRL      0x043b
 #define PC98_BIOS_MEMSIZE     0x0401
+#define PC98_MODE_FF2         0x006a
+#define PC98_MODE_STATUS      0x09a0
+#define PC98_PEGC_CONTROL     0x000e0000
+#define PC98_PEGC_APERTURE    0x0f00000
+#define PC98_PEGC_HIGH_ALIAS  0xfff00000
 
 #define PC98_PCM_CLOCK_PORT   0xa466
 #define PC98_PCM_FIFO_PORT    0xa468
@@ -197,6 +202,48 @@ static void test_pc9801_low_memory_workarea(void)
     g_assert_cmphex(qtest_readb(qts, PC98_BIOS_MEMSIZE), ==, 0x78);
     qtest_outb(qts, PC98_SYS16M_CTRL, 0x00);
     g_assert_cmphex(qtest_readb(qts, PC98_BIOS_MEMSIZE), ==, 0x70);
+    qtest_quit(qts);
+}
+
+static void test_pc9821_pegc_selection(void)
+{
+    QTestState *qts;
+
+    /* PEGC is opt-in: the default releases 15--16 MiB as ordinary RAM. */
+    qts = qtest_init(
+        "-machine pc9821 -m 16M -nodefaults -display none");
+    qtest_outb(qts, PC98_SYS16M_CTRL, 0x04);
+    g_assert_cmphex(qtest_inb(qts, PC98_SYS16M_CTRL), ==, 0x04);
+    g_assert_cmphex(qtest_readb(qts, PC98_BIOS_MEMSIZE), ==, 0x78);
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0x5a);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0x5a);
+    qtest_quit(qts);
+
+    /* Full PEGC owns the system-space hole and acknowledges its modes. */
+    qts = qtest_init(
+        "-machine pc9821,pegc=on -m 16M -nodefaults -display none");
+    qtest_outb(qts, PC98_SYS16M_CTRL, 0x04);
+    g_assert_cmphex(qtest_inb(qts, PC98_SYS16M_CTRL), ==, 0x00);
+    g_assert_cmphex(qtest_readb(qts, PC98_BIOS_MEMSIZE), ==, 0x70);
+
+    qtest_outb(qts, PC98_MODE_FF2, 0x07);
+    qtest_outb(qts, PC98_MODE_FF2, 0x21);
+    qtest_outb(qts, PC98_MODE_STATUS, 0x0a);
+    g_assert_cmphex(qtest_inb(qts, PC98_MODE_STATUS) & 1, ==, 1);
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0x96);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0xff);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x100, 0x80);
+    g_assert_cmphex(qtest_readw(qts, PC98_PEGC_CONTROL + 0x100), ==, 0);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x102, 1);
+    g_assert_cmphex(qtest_readw(qts, PC98_PEGC_CONTROL + 0x102), ==, 1);
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0xa5);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0xa5);
+    qtest_writeb(qts, PC98_PEGC_HIGH_ALIAS + 1, 0x3c);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + 1), ==, 0x3c);
+
+    qtest_outb(qts, PC98_MODE_FF2, 0x69);
+    qtest_outb(qts, PC98_MODE_STATUS, 0x0d);
+    g_assert_cmphex(qtest_inb(qts, PC98_MODE_STATUS) & 1, ==, 1);
     qtest_quit(qts);
 }
 
@@ -1257,6 +1304,8 @@ int main(int argc, char **argv)
                    test_pc9821_has_pci_coregraph);
     qtest_add_func("/pc98/pc9801/low-memory-workarea",
                    test_pc9801_low_memory_workarea);
+    qtest_add_func("/pc98/pc9821/pegc-selection",
+                   test_pc9821_pegc_selection);
     qtest_add_func("/pc98/pc9821/usb-pci-io-mmio-irq",
                    test_pc9821_usb_pci_io_mmio_irq);
     qtest_add_func("/pc98/lgy98/port-map",

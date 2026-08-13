@@ -28,6 +28,7 @@
 	.equ	GDC_TEXT_CMD,	0x0062
 	.equ	GDC_MODE_1,	0x0068
 	.equ	GDC_MODE_2,	0x006a
+	.equ	GDC_MODE_STATUS, 0x09a0
 	.equ	GDC_GRAPH_PARAM, 0x00a0
 	.equ	GDC_GRAPH_CMD,	0x00a2
 	.equ	GDC_DISPLAY_BANK, 0x00a4
@@ -236,6 +237,7 @@ cold_start:
 	 */
 	movw	$0x1900, 0x054a
 	movw	$0x704f, 0x054c
+	call	pegc_probe
 	/*
 	 * BIOS_FLAG0 bit 1 advertises the 1-MiB floppy interface (the native
 	 * PC-98 1.2-MiB format).  The controller exists even when no medium is
@@ -3862,6 +3864,37 @@ ascii_table:
 	.ascii	"zxcvbnm,./"
 	.byte	0x00, 0x20
 ascii_table_end:
+
+/*
+ * Publish PEGC in the BIOS work area only when the board acknowledges the
+ * standard 256-colour enable flip-flop.  With -M pc9821,pegc=off the ITF has
+ * already released the 16 MiB system space, so QEMU deliberately ignores the
+ * enable request and the status bit stays clear.  Keep this helper after the
+ * fixed-address tables so growth cannot move an option-ROM ABI entry.
+ */
+pegc_probe:
+	pushw	%ax
+	pushw	%dx
+	andb	$0x7f, CRT_GRAPH_MODE + 1
+	movb	$0x07, %al		/* unlock extended mode writes */
+	outb	%al, $GDC_MODE_2
+	movb	$0x21, %al		/* enable packed 256-colour mode */
+	outb	%al, $GDC_MODE_2
+	movw	$GDC_MODE_STATUS, %dx
+	movb	$0x0a, %al		/* PEGC mode-presence selector */
+	outb	%al, %dx
+	inb	%dx, %al
+	testb	$0x01, %al
+	jz	1f
+	orb	$0x80, CRT_GRAPH_MODE + 1
+1:
+	movb	$0x20, %al		/* leave the console in GDC mode */
+	outb	%al, $GDC_MODE_2
+	movb	$0x06, %al		/* protect extended mode writes */
+	outb	%al, $GDC_MODE_2
+	popw	%dx
+	popw	%ax
+	ret
 
 	/* CPU reset while the main bank is already selected. */
 	.org	0x17ff0

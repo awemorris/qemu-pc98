@@ -24,7 +24,8 @@ Machine variants
   and the on-board Core-Graph bridge.  The Cirrus graphics function below
   Core-Graph is not exposed as a separate PCI function.  A limited
   640x400 packed-pixel PEGC path is retained because the stock Xa7 ROM uses
-  it for both its video-memory test and POST display.
+  it for both its video-memory test and POST display.  Full PEGC is an
+  optional compatibility-BIOS feature.
 
 This distinction is a machine contract: selecting ``pc9801`` must never
 silently add PCI or Core-Graph.  Both variants can use the same free
@@ -55,6 +56,14 @@ With the firmware in ``<romdir>`` and a bootable floppy image:
 
 Use ``-M pc9821`` instead when the PCI/Core-Graph machine is required.
 
+PEGC is disabled by default so a 16 MiB guest can use the complete 15--16 MiB
+range as RAM.  Enable it with ``-M pc9821,pegc=on`` when installing an
+operating system that requires the PC-9821 256-colour display, such as the
+PC-98 edition of Windows 2000.  This option reserves the 16 MiB system-space
+hole and therefore reports 1 MiB less low memory.  It is accepted only on
+``pc9821`` and only with QEMU's free compatibility BIOS; QEMU rejects it when
+a vendor BIOS dump is selected.
+
 Supported devices
 -----------------
 
@@ -72,15 +81,20 @@ Supported devices
 * Built-in IDE (IRQ 9): two channels multiplexed onto one register block,
   addressed with the PC-98 fixed 8-head / 17-sector BIOS geometry.
 * Display: uPD7220 (GDC) text and graphics with the GRCG and EGC blitters,
-  and the 8/16-colour planar modes.  ``pc9821`` additionally implements the
-  PEGC subset required by the stock Xa7 ROM: 640x400 packed-pixel VRAM,
-  two bank selectors and the 256-colour palette.  PEGC 640x480 and other
-  extended functions are not implemented.  Accelerated graphics use Cirrus
-  through Core-Graph.
+  and the 8/16-colour planar modes.  ``pc9821`` retains the PEGC subset
+  required by the stock Xa7 ROM for its 640x400 packed-pixel POST.  With
+  ``pegc=on``, the compatibility BIOS additionally advertises PEGC and the
+  display supports the 640x480 packed-pixel mode, linear VRAM aperture, two
+  bank selectors and 256-colour palette used by Windows setup.  Accelerated
+  graphics use Cirrus through Core-Graph.
 
-The PEGC POST aperture occupies ``0xf00000`` through ``0xf7ffff`` only while
-the 16 MiB system space is enabled.  When firmware disables that space, the
-PEGC mapping is removed and the full 15--16 MiB range is ordinary RAM.
+The PEGC aperture occupies ``0xf00000`` through ``0xf7ffff``.  With the
+default ``pegc=off`` it is present only while the 16 MiB system space is
+enabled for a stock-ROM POST; when firmware disables that space, the mapping
+is removed and the full 15--16 MiB range becomes ordinary RAM.  With
+``pegc=on`` the system space and aperture remain enabled for the guest, and
+the same VRAM is also visible through the 32-bit hardware alias at
+``0xfff00000`` through ``0xfff7ffff``.
 
 Disks
 -----

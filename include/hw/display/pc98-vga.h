@@ -24,6 +24,7 @@ typedef struct VGAState Pc98VgaState;
  */
 Pc98VgaState *pc98_vga_init(MemoryRegion *system_io, qemu_irq irq,
                             bool pegc_post_compat,
+                            bool pegc_enabled,
                             Pc98VgaRegions *regions);
 
 /* Let a board-level monitor relay reuse and render the GDC console. */

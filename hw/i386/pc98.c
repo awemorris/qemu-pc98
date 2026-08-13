@@ -100,6 +100,7 @@ struct Pc98MachineState {
     Pc98VgaState *vga;
     Pc98IdeState *ide;
     uint8_t shutdown_index;
+    bool pegc_enabled;
 
     PortioList portio_list;
 };
@@ -111,6 +112,7 @@ struct Pc98MachineClass {
     bool has_wab;   /* instantiate the legacy NEC-LSI/Cirrus WAB */
     bool has_coregraph; /* PCI Core-Graph with a non-PnP Cirrus child */
     bool pegc_post_compat; /* stock Xa7 ROM 640x400 packed-pixel POST path */
+    bool supports_pegc; /* full PEGC can be selected with the free BIOS */
 };
 
 #define TYPE_PC98_MACHINE   MACHINE_TYPE_NAME("pc98")
@@ -118,6 +120,16 @@ struct Pc98MachineClass {
 #define TYPE_PC9821_MACHINE MACHINE_TYPE_NAME("pc9821")
 #define PC98_PCI_IRQ 14
 OBJECT_DECLARE_TYPE(Pc98MachineState, Pc98MachineClass, PC98_MACHINE)
+
+static bool pc98_machine_get_pegc(Object *obj, Error **errp)
+{
+    return PC98_MACHINE(obj)->pegc_enabled;
+}
+
+static void pc98_machine_set_pegc(Object *obj, bool value, Error **errp)
+{
+    PC98_MACHINE(obj)->pegc_enabled = value;
+}
 
 /*
  * Board-level I/O ports serviced directly by the machine object: the A20
@@ -392,6 +404,7 @@ static void pc98_devices_init(Pc98MachineState *pms)
     /* display (vsync IRQ2); must precede pc98_mem_init */
     pms->vga = pc98_vga_init(get_system_io(), x86ms->gsi[2],
                              pmc->pegc_post_compat,
+                             pms->pegc_enabled,
                              &vga_regions);
 
     /*
@@ -402,6 +415,7 @@ static void pc98_devices_init(Pc98MachineState *pms)
                              machine->ram, machine->ram_size, &vga_regions,
                               pms->ide ? pc98_ide_connected(pms->ide) : 0,
                               pmc->has_pci, pmc->pegc_post_compat,
+                              pms->pegc_enabled,
                               pc98_vga_select_ems, pms->vga);
 
     /*
@@ -481,10 +495,15 @@ static void pc98_devices_init(Pc98MachineState *pms)
 static void pc98_machine_state_init(MachineState *machine)
 {
     Pc98MachineState *pms = PC98_MACHINE(machine);
+    Pc98MachineClass *pmc = PC98_MACHINE_GET_CLASS(pms);
     X86MachineState *x86ms = X86_MACHINE(machine);
 
     if (machine->ram_size < 2 * MiB) {
         error_report("pc98 machine requires at least 2 MiB of RAM");
+        exit(1);
+    }
+    if (pms->pegc_enabled && !pmc->supports_pegc) {
+        error_report("PEGC is only available on the pc9821 machine");
         exit(1);
     }
     /*
@@ -552,10 +571,18 @@ static void pc98_class_init(ObjectClass *oc, const void *data)
     mc->no_parallel = 1;
     mc->no_cdrom = 1;
 
+    object_class_property_add_bool(oc, "pegc",
+                                   pc98_machine_get_pegc,
+                                   pc98_machine_set_pegc);
+    object_class_property_set_description(
+        oc, "pegc",
+        "Enable PEGC (requires pc9821 and the QEMU compatibility BIOS)");
+
     pmc->has_pci = false;
     pmc->has_wab = true;
     pmc->has_coregraph = false;
     pmc->pegc_post_compat = false;
+    pmc->supports_pegc = false;
 
 }
 
@@ -573,6 +600,7 @@ static void pc9801_class_init(ObjectClass *oc, const void *data)
     pmc->has_wab = false;
     pmc->has_coregraph = false;
     pmc->pegc_post_compat = false;
+    pmc->supports_pegc = false;
 
     compat_props_add(mc->compat_props, pc98_compat_props,
                      G_N_ELEMENTS(pc98_compat_props));
@@ -592,6 +620,7 @@ static void pc9821_class_init(ObjectClass *oc, const void *data)
     pmc->has_wab = false;
     pmc->has_coregraph = true;
     pmc->pegc_post_compat = true;
+    pmc->supports_pegc = true;
 
     compat_props_add(mc->compat_props, pc98_compat_props,
                      G_N_ELEMENTS(pc98_compat_props));

@@ -48,6 +48,7 @@
  *   +-- pc98.ram-mid @ 0x100000      alias ram[1M..15M)
  *   +-- pc98.ram-f00000 @ 0xf00000   alias ram[15M..16M)  (16MB space off)
  *   +-- pc98.pegc-post @ 0xf00000     Xa7 POST backing      (16MB space on)
+ *   +-- pc98.pegc-high @ 0xfff00000   full PEGC high alias  (PEGC enabled)
  *   +-- pc98.sys16m-mirror @ 0xfa0000 alias lowmem[0xa0000..1M)
  *   |                                 (16MB space on)
  *   +-- pc98.ram-high @ 0x1000000    alias ram[16M..) (if ram > 16M)
@@ -153,6 +154,7 @@ struct Pc98MemState {
     MemoryRegion ram_mid;
     MemoryRegion ram_f00000;
     MemoryRegion *pegc_post;
+    MemoryRegion pegc_high;
     MemoryRegion sys16m_mirror;
     MemoryRegion ram_high;
     MemoryRegion top_mirror;
@@ -173,6 +175,7 @@ struct Pc98MemState {
     uint8_t hd_mask;          /* attached IDE disks, bit per drive */
     bool has_pci;             /* PCI machine: 0xc0000 window shadowed as RAM */
     bool pegc_post_compat;     /* NEC Xa7 ROM packed-pixel POST path */
+    bool pegc_enabled;         /* full PEGC selected by the machine property */
     uint8_t d000_shadow;      /* PCI reg 0x64: D000 shadow-RAM enable bits */
     uint8_t bios_probe_write; /* PCI config 0x69 bit 4 */
     uint8_t f8e90_reset;
@@ -183,6 +186,8 @@ struct Pc98MemState {
 
     void (*ems_cb)(void *opaque, uint32_t value);
     void *ems_cb_arg;
+    void (*pegc_post_cb)(void *opaque, bool active);
+    void *pegc_post_cb_arg;
 };
 
 static void mem_apply_cbus_rom_gate(Pc98MemState *s, bool enable)
@@ -354,11 +359,15 @@ static void mem_apply_sys16m(Pc98MemState *s)
     if (s->has_ram_f00000) {
         memory_region_set_enabled(&s->ram_f00000, !s->sys16m);
     }
-    if (s->pegc_post_compat) {
+    if (s->pegc_post_compat || s->pegc_enabled) {
         memory_region_set_enabled(s->pegc_post, s->sys16m);
     }
 
     memory_region_transaction_commit();
+    if (s->pegc_post_cb) {
+        s->pegc_post_cb(s->pegc_post_cb_arg,
+                        s->pegc_post_compat && s->sys16m);
+    }
 }
 
 static void mem_sync_sys16m_workarea(Pc98MemState *s)
@@ -557,7 +566,7 @@ static void mem_patch_bios_workarea(Pc98MemState *s)
 static void mem_sys16m_write(void *opaque, uint32_t addr, uint32_t data)
 {
     Pc98MemState *s = opaque;
-    uint8_t enable = !(data & 0x04);
+    uint8_t enable = s->pegc_enabled || !(data & 0x04);
 
     if (s->sys16m != enable) {
         s->sys16m = enable;
@@ -944,6 +953,20 @@ static bool mem_load_firmware(Pc98MemState *s, uint8_t *buf)
     return true;
 }
 
+static bool mem_is_compatibility_bios(const uint8_t *buf)
+{
+    static const char signature[] = "PC-98 COMPATIBILITY BIOS SETUP";
+    const uint8_t *bios = buf + OFF_BIOS;
+    size_t i;
+
+    for (i = 0; i + sizeof(signature) - 1 <= ROM_BIOS_BYTES; i++) {
+        if (!memcmp(bios + i, signature, sizeof(signature) - 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * Reset.  sys16m is deliberately left untouched: the 16 MiB-space selection is
  * a latch that survives a soft reset on real hardware, so re-seeding it here
@@ -957,6 +980,7 @@ static void pc98_mem_reset(void *opaque)
     s->win_map[1] = 0x0a;
     mem_apply_window(s, 0);
     mem_apply_window(s, 1);
+    mem_apply_sys16m(s);
 
     /*
      * PCI (Xa7) firmware shadows the 0xd8000 window as RAM for the sizing
@@ -1063,6 +1087,7 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
                             uint8_t hd_connect,
                             bool has_pci,
                             bool pegc_post_compat,
+                            bool pegc_enabled,
                             void (*ems_select)(void *opaque, uint32_t value),
                             void *ems_opaque)
 {
@@ -1073,12 +1098,15 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
     s->ram_size = ram_size;
     s->hd_mask = hd_connect;
     s->has_pci = has_pci;
-    s->pegc_post_compat = pegc_post_compat;
+    s->pegc_post_compat = pegc_post_compat && !pegc_enabled;
+    s->pegc_enabled = pegc_enabled;
     s->cbus_option_roms = g_ptr_array_new();
     s->cbus_rom_gate = !has_pci;
     s->sys16m = 1;
     s->ems_cb = ems_select;
     s->ems_cb_arg = ems_opaque;
+    s->pegc_post_cb = vga->set_pegc_post_active;
+    s->pegc_post_cb_arg = vga->pegc_opaque;
 
     /* ROM blob */
     buf = g_malloc(ROM_IMAGE_BYTES);
@@ -1086,6 +1114,10 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
     if (!mem_load_firmware(s, buf)) {
         error_report("could not load PC-9821 BIOS "
                      "(pc98bank*.bin or pc98itf.bin+pc98bios.bin; use -L)");
+        exit(1);
+    }
+    if (s->pegc_enabled && !mem_is_compatibility_bios(buf)) {
+        error_report("PEGC requires the QEMU PC-98 compatibility BIOS");
         exit(1);
     }
     s->f8e90_reset = buf[BANK_BIOS_TOP * ROM_BANK_BYTES + 0xe90];
@@ -1261,10 +1293,20 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
      * mem_apply_sys16m().
      */
     s->pegc_post = vga->pegc_post;
-    if (s->pegc_post_compat) {
+    if (s->pegc_post_compat || s->pegc_enabled) {
         memory_region_add_subregion_overlap(system_memory, 0xf00000,
                                             s->pegc_post, 1);
         memory_region_set_enabled(s->pegc_post, s->sys16m);
+    }
+    if (s->pegc_enabled) {
+        /*
+         * 32-bit PC-9821 software, including Windows NT setup, uses the
+         * always-present top-of-address-space alias of the linear PEGC VRAM.
+         */
+        memory_region_init_alias(&s->pegc_high, NULL, "pc98.pegc-high",
+                                 s->pegc_post, 0, 0x80000);
+        memory_region_add_subregion(system_memory, 0xfff00000,
+                                    &s->pegc_high);
     }
 
     /*
