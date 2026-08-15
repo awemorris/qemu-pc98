@@ -33,6 +33,7 @@
 #include "hw/core/boards.h"
 #include "hw/core/cpu.h"
 #include "hw/core/irq.h"
+#include "hw/core/split-irq.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "hw/audio/pcspk.h"
@@ -48,7 +49,10 @@
 #include "hw/input/pc98-kbd.h"
 #include "hw/input/pc98-mouse.h"
 #include "hw/i386/x86.h"
+#include "hw/i386/apic_internal.h"
 #include "hw/intc/i8259-pc98.h"
+#include "hw/intc/ioapic.h"
+#include "hw/intc/ioapic_internal.h"
 #include "hw/isa/isa.h"
 #include "hw/misc/pc98-sys.h"
 #include "hw/scsi/pc98-scsi.h"
@@ -99,8 +103,10 @@ struct Pc98MachineState {
     Pc98SysState *sys;
     Pc98VgaState *vga;
     Pc98IdeState *ide;
+    DeviceState *ioapic;
     uint8_t shutdown_index;
     bool pegc_enabled;
+    bool smp_enabled;
 
     PortioList portio_list;
 };
@@ -113,6 +119,7 @@ struct Pc98MachineClass {
     bool has_coregraph; /* PCI Core-Graph with a non-PnP Cirrus child */
     bool pegc_post_compat; /* stock Xa7 ROM 640x400 packed-pixel POST path */
     bool supports_pegc; /* full PEGC can be selected with the free BIOS */
+    bool supports_smp;
 };
 
 #define TYPE_PC98_MACHINE   MACHINE_TYPE_NAME("pc98")
@@ -301,6 +308,52 @@ static const VMStateDescription vmstate_pc98_machine = {
     }
 };
 
+static int pc98_ioapic_pin(int irq)
+{
+    assert(irq >= 0 && irq < ISA_NUM_IRQS && irq != 7);
+    return irq < 7 ? irq : irq - 1;
+}
+
+static qemu_irq pc98_smp_pic_irq(Pc98MachineState *pms)
+{
+    DeviceState *splitter = qdev_new(TYPE_SPLIT_IRQ);
+
+    qdev_prop_set_uint16(splitter, "num-lines", 2);
+    object_property_add_child(OBJECT(pms), "pic-output-splitter",
+                              OBJECT(splitter));
+    qdev_realize_and_unref(splitter, NULL, &error_fatal);
+    qdev_connect_gpio_out(splitter, 0, x86_allocate_cpu_irq());
+    qdev_connect_gpio_out(splitter, 1,
+                          qdev_get_gpio_in(pms->ioapic,
+                                           PC98_IOAPIC_EXTINT_PIN));
+    return qdev_get_gpio_in(splitter, 0);
+}
+
+static void pc98_smp_ioapic_init(Pc98MachineState *pms,
+                                 GSIState *gsi_state)
+{
+    X86MachineState *x86ms = X86_MACHINE(pms);
+    DeviceState *dev = qdev_new(TYPE_IOAPIC);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
+    int irq;
+
+    object_property_add_child(OBJECT(pms), "ioapic", OBJECT(dev));
+    qdev_prop_set_uint8(dev, "version", 0x11);
+    sysbus_realize_and_unref(sbd, &error_fatal);
+    sysbus_mmio_map(sbd, 0, IO_APIC_DEFAULT_ADDRESS);
+    IOAPIC_COMMON(dev)->id = PC98_IOAPIC_ID;
+    pms->ioapic = dev;
+    x86ms->ioapic_as = &address_space_memory;
+
+    /* IRQ7 is the slave-PIC cascade, not an independently routed IRQ. */
+    for (irq = 0; irq < ISA_NUM_IRQS; irq++) {
+        if (irq != 7) {
+            gsi_state->ioapic_irq[irq] =
+                qdev_get_gpio_in(dev, pc98_ioapic_pin(irq));
+        }
+    }
+}
+
 static void pc98_devices_init(Pc98MachineState *pms)
 {
     MachineState *machine = MACHINE(pms);
@@ -321,8 +374,13 @@ static void pc98_devices_init(Pc98MachineState *pms)
                           &error_abort);
     isa_bus_register_input_irqs(isa_bus, x86ms->gsi);
 
+    if (pms->smp_enabled) {
+        pc98_smp_ioapic_init(pms, gsi_state);
+    }
+
     /* PICs: master at 0x00, slave at 0x08, cascade on IRQ7 */
-    i8259 = pc98_pic_setup(isa_bus, x86_allocate_cpu_irq());
+    i8259 = pc98_pic_setup(isa_bus, pms->smp_enabled ?
+                           pc98_smp_pic_irq(pms) : x86_allocate_cpu_irq());
     for (i = 0; i < ISA_NUM_IRQS; i++) {
         gsi_state->i8259_irq[i] = i8259[i];
     }
@@ -417,6 +475,9 @@ static void pc98_devices_init(Pc98MachineState *pms)
                               pmc->has_pci, pmc->pegc_post_compat,
                               pms->pegc_enabled,
                               pc98_vga_select_ems, pms->vga);
+    if (pms->smp_enabled) {
+        pc98_mem_install_mptable(pms->mem, &error_fatal);
+    }
 
     /*
      * PC-9801-92 compatible C-Bus SCSI interface.  It is created only when
@@ -522,18 +583,60 @@ static void pc98_machine_state_init(MachineState *machine)
 
     x86_cpus_init(x86ms, CPU_VERSION_LATEST);
 
+    pms->smp_enabled = machine->smp.cpus > 1;
+    if (pms->smp_enabled) {
+        CPUState *cs;
+
+        if (!pmc->supports_smp) {
+            error_report("SMP is only supported by the pc9821 machine");
+            exit(1);
+        }
+        CPU_FOREACH(cs) {
+            X86CPU *cpu = X86_CPU(cs);
+            CPUX86State *env = &cpu->env;
+            unsigned family = x86_cpu_family(env->cpuid_version);
+            unsigned model = x86_cpu_model(env->cpuid_version);
+
+            if (!(env->features[FEAT_1_EDX] & CPUID_APIC) ||
+                family < 6 || (family == 6 && model < 3)) {
+                error_report("pc9821 SMP requires a Pentium II or later "
+                             "CPU with APIC support");
+                exit(1);
+            }
+            if (cpu->apic_id >= PC98_IOAPIC_ID) {
+                error_report("pc9821 SMP CPU APIC ID %u conflicts with "
+                             "the I/O APIC ID", cpu->apic_id);
+                exit(1);
+            }
+        }
+    }
+
     pc98_devices_init(pms);
     vmstate_register(NULL, 0, &vmstate_pc98_machine, pms);
 }
 
 static void pc98_machine_reset(MachineState *machine, ResetType type)
 {
+    Pc98MachineState *pms = PC98_MACHINE(machine);
     CPUState *cs;
 
     qemu_devices_reset(type);
 
     CPU_FOREACH(cs) {
         x86_cpu_after_reset(X86_CPU(cs));
+    }
+
+    {
+        X86CPU *bsp = X86_CPU(first_cpu);
+
+        /* Firmware uses the PIC; an APIC-aware OS may replace this wire. */
+        if (bsp->apic_state) {
+            bsp->apic_state->lvt[APIC_LVT_LINT0] =
+                APIC_DM_EXTINT << APIC_LVT_DELIV_MOD_SHIFT;
+        }
+    }
+    if (pms->smp_enabled) {
+        IOAPIC_COMMON(pms->ioapic)->id = PC98_IOAPIC_ID;
     }
 }
 
@@ -583,6 +686,7 @@ static void pc98_class_init(ObjectClass *oc, const void *data)
     pmc->has_coregraph = false;
     pmc->pegc_post_compat = false;
     pmc->supports_pegc = false;
+    pmc->supports_smp = false;
 
 }
 
@@ -601,6 +705,7 @@ static void pc9801_class_init(ObjectClass *oc, const void *data)
     pmc->has_coregraph = false;
     pmc->pegc_post_compat = false;
     pmc->supports_pegc = false;
+    pmc->supports_smp = false;
 
     compat_props_add(mc->compat_props, pc98_compat_props,
                      G_N_ELEMENTS(pc98_compat_props));
@@ -616,11 +721,13 @@ static void pc9821_class_init(ObjectClass *oc, const void *data)
     Pc98MachineClass *pmc = PC98_MACHINE_CLASS(oc);
 
     mc->desc = "NEC PC-9821";
+    mc->max_cpus = 4;
     pmc->has_pci = true;
     pmc->has_wab = false;
     pmc->has_coregraph = true;
     pmc->pegc_post_compat = true;
     pmc->supports_pegc = true;
+    pmc->supports_smp = true;
 
     compat_props_add(mc->compat_props, pc98_compat_props,
                      G_N_ELEMENTS(pc98_compat_props));

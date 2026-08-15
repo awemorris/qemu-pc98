@@ -56,6 +56,22 @@ With the firmware in ``<romdir>`` and a bootable floppy image:
 
 Use ``-M pc9821`` instead when the PCI/Core-Graph machine is required.
 
+The ``pc9821`` machine supports one to four processors.  SMP requires a
+Pentium II or later CPU model with a local APIC and QEMU's free compatibility
+BIOS.  QEMU supplies an Intel MPS 1.4 table and the PC-98 I/O APIC routing;
+the firmware does not start application processors.  An SMP-capable guest OS
+discovers the table and starts each AP with INIT/SIPI.  For example:
+
+.. code-block:: console
+
+   qemu-system-i386 -M pc9821 -smp 4 -cpu pentium2 -L <romdir> \
+       -drive if=ide,format=raw,file=hdd.raw
+
+Pentium III and Core Duo CPU models, as well as Pentium 4-class family 15
+configurations, are also accepted.  Requesting SMP with a Pentium, Pentium Pro,
+486 or a CPU without APIC support is rejected.  The ``pc9801`` machine remains
+limited to one processor.
+
 PEGC is disabled by default so a 16 MiB guest can use the complete 15--16 MiB
 range as RAM.  Enable it with ``-M pc9821,pegc=on`` when installing an
 operating system that requires the PC-9821 256-colour display, such as the
@@ -67,7 +83,8 @@ a vendor BIOS dump is selected.
 Supported devices
 -----------------
 
-* One Pentium-class CPU (uniprocessor).
+* One CPU on ``pc9801``; one to four CPUs on ``pc9821``.  SMP uses local APICs,
+  an I/O APIC and an Intel MPS 1.4 table as described above.
 * Interrupt controllers: a master/slave 8259A pair with the cascade on IRQ 7
   (the PC/AT uses IRQ 2), reachable at the stride-2 PC-98 ports.
 * Interval timer: 8253/8254 clocked at 2.4576 MHz.

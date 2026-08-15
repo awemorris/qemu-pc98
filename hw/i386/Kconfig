@@ -122,6 +122,8 @@ config PC98
     bool
     default y
     depends on I386
+    select IOAPIC
+    select SPLIT_IRQ
     select ISA_BUS
     select PCI
     select PC98_I8259

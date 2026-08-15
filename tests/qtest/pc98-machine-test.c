@@ -95,9 +95,84 @@
 #define PC98_PEGC_CONTROL     0x000e0000
 #define PC98_PEGC_APERTURE    0x0f00000
 #define PC98_PEGC_HIGH_ALIAS  0xfff00000
+#define PC98_MP_FLOAT_ADDR     0x000f4c40
+#define PC98_MP_CONFIG_ADDR    0x000f4c50
+#define PC98_IOAPIC_ID         4
 
 #define PC98_PCM_CLOCK_PORT   0xa466
 #define PC98_PCM_FIFO_PORT    0xa468
+
+static uint8_t pc98_test_checksum(const uint8_t *data, size_t length)
+{
+    uint8_t sum = 0;
+
+    while (length--) {
+        sum += *data++;
+    }
+    return sum;
+}
+
+static void test_pc9821_smp_mptable(void)
+{
+    QTestState *qts = qtest_init("-machine pc9821 -cpu pentium2 -smp 4 "
+                                 "-nodefaults -display none");
+    uint8_t floating[16];
+    uint8_t table[512];
+    uint16_t length;
+    uint16_t entry_count;
+    unsigned processors = 0;
+    unsigned ioapics = 0;
+    unsigned entries = 0;
+    size_t offset = 44;
+
+    qtest_memread(qts, PC98_MP_FLOAT_ADDR, floating, sizeof(floating));
+    g_assert_cmpmem(floating, 4, "_MP_", 4);
+    g_assert_cmphex(ldl_le_p(floating + 4), ==, PC98_MP_CONFIG_ADDR);
+    g_assert_cmpuint(floating[8], ==, 1);
+    g_assert_cmpuint(floating[9], ==, 4);
+    g_assert_cmpuint(pc98_test_checksum(floating, sizeof(floating)), ==, 0);
+
+    qtest_memread(qts, PC98_MP_CONFIG_ADDR, table, sizeof(table));
+    g_assert_cmpmem(table, 4, "PCMP", 4);
+    length = lduw_le_p(table + 4);
+    entry_count = lduw_le_p(table + 34);
+    g_assert_cmpuint(length, <=, sizeof(table));
+    g_assert_cmpuint(pc98_test_checksum(table, length), ==, 0);
+    g_assert_cmphex((uint32_t)ldl_le_p(table + 36), ==, 0xfee00000);
+
+    while (entries < entry_count) {
+        uint8_t type = table[offset];
+        size_t entry_length = type == 0 ? 20 : 8;
+
+        g_assert_cmpuint(type, <=, 4);
+        g_assert_cmpuint(offset + entry_length, <=, length);
+        if (type == 0) {
+            g_assert_cmpuint(table[offset + 3] & 1, ==, 1);
+            if (processors == 0) {
+                g_assert_cmpuint(table[offset + 3] & 2, ==, 2);
+            }
+            processors++;
+        } else if (type == 2) {
+            g_assert_cmpuint(table[offset + 1], ==, PC98_IOAPIC_ID);
+            g_assert_cmpuint(table[offset + 2], ==, 0x11);
+            g_assert_cmphex((uint32_t)ldl_le_p(table + offset + 4), ==,
+                            0xfec00000);
+            ioapics++;
+        }
+        offset += entry_length;
+        entries++;
+    }
+    g_assert_cmpuint(offset, ==, length);
+    g_assert_cmpuint(processors, ==, 4);
+    g_assert_cmpuint(ioapics, ==, 1);
+
+    qtest_writel(qts, 0xfec00000, 0);
+    g_assert_cmphex((qtest_readl(qts, 0xfec00010) >> 24) & 0xf, ==,
+                    PC98_IOAPIC_ID);
+    qtest_writel(qts, 0xfec00000, 1);
+    g_assert_cmphex(qtest_readl(qts, 0xfec00010) & 0xff, ==, 0x11);
+    qtest_quit(qts);
+}
 #define PC98_PCM_DACTRL_PORT  0xa46a
 #define PC98_PCM_DATA_PORT    0xa46c
 #define PC98_SLAVE_PIC_CMD    0x0008
@@ -1306,6 +1381,8 @@ int main(int argc, char **argv)
                    test_pc9801_low_memory_workarea);
     qtest_add_func("/pc98/pc9821/pegc-selection",
                    test_pc9821_pegc_selection);
+    qtest_add_func("/pc98/pc9821/smp-mptable",
+                   test_pc9821_smp_mptable);
     qtest_add_func("/pc98/pc9821/usb-pci-io-mmio-irq",
                    test_pc9821_usb_pci_io_mmio_irq);
     qtest_add_func("/pc98/lgy98/port-map",

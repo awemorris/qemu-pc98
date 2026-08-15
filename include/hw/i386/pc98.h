@@ -29,6 +29,11 @@ typedef struct Pc98VgaRegions {
 
 typedef struct Pc98MemState Pc98MemState;
 
+#define PC98_IOAPIC_ID          4
+#define PC98_IOAPIC_EXTINT_PIN 15
+#define PC98_MP_FLOAT_ADDR      0x000f4c40
+#define PC98_MP_CONFIG_ADDR     0x000f4c50
+
 /* Install a C-Bus option ROM behind the machine's POST shadow-RAM gate. */
 void pc98_mem_register_cbus_rom(Pc98MemState *s, MemoryRegion *rom,
                                 hwaddr address);
@@ -48,6 +53,9 @@ void pc98_mem_set_d000_shadow(void *opaque, uint8_t bits);
  */
 void pc98_mem_set_bios_probe_write(void *opaque, bool enable);
 void pc98_mem_set_a20_wrap(void *opaque, bool wrap);
+
+/* Install the QEMU-generated Intel MPS tables in the free BIOS reserve. */
+void pc98_mem_install_mptable(Pc98MemState *s, Error **errp);
 
 /* Give the PCI host bridge the memory-controller state for reg 0x64. */
 void pc98_pci_set_d000_mem(void *mem);

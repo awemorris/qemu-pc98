@@ -66,7 +66,10 @@
 #include "qemu/log.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
+#include "hw/core/cpu.h"
 #include "hw/i386/pc98.h"
+#include "hw/isa/isa.h"
+#include "target/i386/cpu.h"
 #include "hw/core/loader.h"
 #include "system/ioport.h"
 #include "system/memory.h"
@@ -111,6 +114,68 @@ enum {
 #define OFF_BIOS        (ROM_BANK_BYTES * BANK_BIOS)
 
 #define REQUIRED_BANKS  ((1 << BANK_ITF) | (7 << BANK_BIOS))
+
+#define PC98_MP_RESERVE_SIZE 0x200
+#define PC98_MP_BIOS_OFFSET  (PC98_MP_FLOAT_ADDR - 0x000e8000)
+
+typedef struct QEMU_PACKED Pc98MpFloating {
+    uint8_t signature[4];
+    uint32_t config_table;
+    uint8_t length;
+    uint8_t spec_revision;
+    uint8_t checksum;
+    uint8_t feature[5];
+} Pc98MpFloating;
+
+typedef struct QEMU_PACKED Pc98MpConfigHeader {
+    uint8_t signature[4];
+    uint16_t length;
+    uint8_t spec_revision;
+    uint8_t checksum;
+    uint8_t oem_id[8];
+    uint8_t product_id[12];
+    uint32_t oem_table;
+    uint16_t oem_table_size;
+    uint16_t entry_count;
+    uint32_t local_apic_address;
+    uint16_t extended_length;
+    uint8_t extended_checksum;
+    uint8_t reserved;
+} Pc98MpConfigHeader;
+
+typedef struct QEMU_PACKED Pc98MpProcessor {
+    uint8_t type;
+    uint8_t apic_id;
+    uint8_t apic_version;
+    uint8_t flags;
+    uint32_t signature;
+    uint32_t feature_flags;
+    uint32_t reserved[2];
+} Pc98MpProcessor;
+
+typedef struct QEMU_PACKED Pc98MpBus {
+    uint8_t type;
+    uint8_t id;
+    uint8_t bus_type[6];
+} Pc98MpBus;
+
+typedef struct QEMU_PACKED Pc98MpIoApic {
+    uint8_t type;
+    uint8_t id;
+    uint8_t version;
+    uint8_t flags;
+    uint32_t address;
+} Pc98MpIoApic;
+
+typedef struct QEMU_PACKED Pc98MpInterrupt {
+    uint8_t type;
+    uint8_t interrupt_type;
+    uint16_t flags;
+    uint8_t source_bus;
+    uint8_t source_irq;
+    uint8_t destination_apic;
+    uint8_t destination_irq;
+} Pc98MpInterrupt;
 
 /* selections for the 0xd8000 option-ROM window (port 0x63c) */
 enum {
@@ -174,6 +239,7 @@ struct Pc98MemState {
     uint8_t ide_rom_present;  /* pc98ide.bin was found */
     uint8_t hd_mask;          /* attached IDE disks, bit per drive */
     bool has_pci;             /* PCI machine: 0xc0000 window shadowed as RAM */
+    bool compatibility_bios;
     bool pegc_post_compat;     /* NEC Xa7 ROM packed-pixel POST path */
     bool pegc_enabled;         /* full PEGC selected by the machine property */
     uint8_t d000_shadow;      /* PCI reg 0x64: D000 shadow-RAM enable bits */
@@ -967,6 +1033,157 @@ static bool mem_is_compatibility_bios(const uint8_t *buf)
     return false;
 }
 
+static uint8_t pc98_mp_checksum(const void *data, size_t length)
+{
+    const uint8_t *p = data;
+    uint8_t sum = 0;
+
+    while (length--) {
+        sum += *p++;
+    }
+    return -sum;
+}
+
+static Pc98MpInterrupt *pc98_mp_add_interrupt(uint8_t **entry,
+                                              uint8_t entry_type,
+                                              uint8_t interrupt_type,
+                                              uint16_t flags,
+                                              uint8_t source_irq,
+                                              uint8_t destination_apic,
+                                              uint8_t destination_irq)
+{
+    Pc98MpInterrupt *interrupt = (Pc98MpInterrupt *)*entry;
+
+    *entry += sizeof(*interrupt);
+    interrupt->type = entry_type;
+    interrupt->interrupt_type = interrupt_type;
+    interrupt->flags = cpu_to_le16(flags);
+    interrupt->source_bus = 0;
+    interrupt->source_irq = source_irq;
+    interrupt->destination_apic = destination_apic;
+    interrupt->destination_irq = destination_irq;
+    return interrupt;
+}
+
+void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
+{
+    uint8_t image[PC98_MP_RESERVE_SIZE] = { 0 };
+    Pc98MpFloating *floating = (Pc98MpFloating *)image;
+    Pc98MpConfigHeader *header = (Pc98MpConfigHeader *)(image + 16);
+    uint8_t *entry = image + 16 + sizeof(*header);
+    uint8_t *rom = memory_region_get_ram_ptr(&s->rom) + OFF_BIOS;
+    CPUState *cs;
+    unsigned entry_count = 0;
+    unsigned processor_count = 0;
+    size_t i;
+    int irq;
+
+    QEMU_BUILD_BUG_ON(sizeof(*floating) != 16);
+    QEMU_BUILD_BUG_ON(sizeof(*header) != 44);
+    QEMU_BUILD_BUG_ON(sizeof(Pc98MpProcessor) != 20);
+    QEMU_BUILD_BUG_ON(sizeof(Pc98MpBus) != 8);
+    QEMU_BUILD_BUG_ON(sizeof(Pc98MpIoApic) != 8);
+    QEMU_BUILD_BUG_ON(sizeof(Pc98MpInterrupt) != 8);
+
+    if (!s->compatibility_bios) {
+        error_setg(errp, "pc9821 SMP requires the QEMU PC-98 compatibility "
+                   "BIOS");
+        return;
+    }
+    for (i = 0; i < PC98_MP_RESERVE_SIZE; i++) {
+        if (rom[PC98_MP_BIOS_OFFSET + i] != 0xff) {
+            error_setg(errp, "PC-98 compatibility BIOS has no empty MPS "
+                       "table reserve at 0x%x", PC98_MP_FLOAT_ADDR);
+            return;
+        }
+    }
+
+    memcpy(floating->signature, "_MP_", 4);
+    floating->config_table = cpu_to_le32(PC98_MP_CONFIG_ADDR);
+    floating->length = 1;
+    floating->spec_revision = 4;
+
+    memcpy(header->signature, "PCMP", 4);
+    header->spec_revision = 4;
+    memcpy(header->oem_id, "QEMU    ", 8);
+    memcpy(header->product_id, "PC-9821 SMP ", 12);
+    header->local_apic_address = cpu_to_le32(0xfee00000);
+
+    CPU_FOREACH(cs) {
+        X86CPU *cpu = X86_CPU(cs);
+        CPUX86State *env = &cpu->env;
+        Pc98MpProcessor *processor = (Pc98MpProcessor *)entry;
+
+        entry += sizeof(*processor);
+        processor->type = 0;
+        processor->apic_id = cpu->apic_id;
+        processor->apic_version = 0x14;
+        processor->flags = 1 | (cs == first_cpu ? 2 : 0);
+        processor->signature = cpu_to_le32(env->cpuid_version);
+        processor->feature_flags =
+            cpu_to_le32(env->features[FEAT_1_EDX]);
+        processor_count++;
+        entry_count++;
+    }
+    if (processor_count < 2 || processor_count > 4) {
+        error_setg(errp, "PC-98 MPS table requires 2 to 4 processors");
+        return;
+    }
+
+    for (irq = 0; irq < 2; irq++) {
+        Pc98MpBus *bus = (Pc98MpBus *)entry;
+
+        entry += sizeof(*bus);
+        bus->type = 1;
+        bus->id = irq;
+        memcpy(bus->bus_type, irq ? "PCI   " : "ISA   ", 6);
+        entry_count++;
+    }
+    {
+        Pc98MpIoApic *ioapic = (Pc98MpIoApic *)entry;
+
+        entry += sizeof(*ioapic);
+        ioapic->type = 2;
+        ioapic->id = PC98_IOAPIC_ID;
+        ioapic->version = 0x11;
+        ioapic->flags = 1;
+        ioapic->address = cpu_to_le32(0xfec00000);
+        entry_count++;
+    }
+
+    /*
+     * PC-98 slave PIC cascades on IRQ7; IRQ8..15 consequently use
+     * I/O APIC pins 7..14.
+     */
+    for (irq = 0; irq < ISA_NUM_IRQS; irq++) {
+        unsigned pin;
+        uint16_t flags;
+
+        if (irq == 7) {
+            continue;
+        }
+        pin = irq < 7 ? irq : irq - 1;
+        flags = irq == 14 ? 0x000d : 0x0005;
+        pc98_mp_add_interrupt(&entry, 3, 0, flags, irq,
+                              PC98_IOAPIC_ID, pin);
+        entry_count++;
+    }
+    pc98_mp_add_interrupt(&entry, 3, 3, 0x0005, 0,
+                          PC98_IOAPIC_ID, PC98_IOAPIC_EXTINT_PIN);
+    entry_count++;
+    pc98_mp_add_interrupt(&entry, 4, 3, 0x0005, 0,
+                          X86_CPU(first_cpu)->apic_id, 0);
+    entry_count++;
+
+    g_assert(entry <= image + sizeof(image));
+    header->length = cpu_to_le16(entry - (uint8_t *)header);
+    header->entry_count = cpu_to_le16(entry_count);
+    header->checksum = pc98_mp_checksum(header,
+                                        entry - (uint8_t *)header);
+    floating->checksum = pc98_mp_checksum(floating, sizeof(*floating));
+    memcpy(rom + PC98_MP_BIOS_OFFSET, image, sizeof(image));
+}
+
 /*
  * Reset.  sys16m is deliberately left untouched: the 16 MiB-space selection is
  * a latch that survives a soft reset on real hardware, so re-seeding it here
@@ -1116,7 +1333,8 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
                      "(pc98bank*.bin or pc98itf.bin+pc98bios.bin; use -L)");
         exit(1);
     }
-    if (s->pegc_enabled && !mem_is_compatibility_bios(buf)) {
+    s->compatibility_bios = mem_is_compatibility_bios(buf);
+    if (s->pegc_enabled && !s->compatibility_bios) {
         error_report("PEGC requires the QEMU PC-98 compatibility BIOS");
         exit(1);
     }

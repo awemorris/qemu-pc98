@@ -104,6 +104,16 @@
 	.endm
 
 	/*
+	 * QEMU fills this otherwise-unused area with an Intel MPS 1.4 floating
+	 * pointer and configuration table when pc9821 SMP is selected.
+	 * Firmware code does not participate in AP startup; the operating
+	 * system uses the advertised local APICs and sends INIT/SIPI itself.
+	 */
+	.org	0x0cc40
+mps_table_reserve:
+	.fill	0x200, 1, 0xff
+
+	/*
 	 * Plug and Play BIOS 1.0A installation-check structure.
 	 *
 	 * NEC's Xa7 firmware publishes this at physical F51B0h.  Windows uses
