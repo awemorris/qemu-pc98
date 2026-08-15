@@ -167,7 +167,7 @@ static void ioapic_set_irq(void *opaque, int vector, int level)
 
     trace_ioapic_set_irq(vector, level);
     ioapic_stat_update_irq(s, vector, level);
-    if (vector == 0) {
+    if (vector == 0 && s->irq0_to_gsi2) {
         vector = 2;
     }
     if (vector < IOAPIC_NUM_PINS) {
@@ -485,6 +485,7 @@ static void ioapic_unrealize(DeviceState *dev)
 
 static const Property ioapic_properties[] = {
     DEFINE_PROP_UINT8("version", IOAPICCommonState, version, IOAPIC_VER_DEF),
+    DEFINE_PROP_BOOL("irq0-to-gsi2", IOAPICCommonState, irq0_to_gsi2, true),
 };
 
 static void ioapic_class_init(ObjectClass *klass, const void *data)

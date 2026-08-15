@@ -632,6 +632,7 @@ void do_cpu_init(X86CPU *cpu)
     CPUX86State *env = &cpu->env;
     CPUX86State *save = g_new(CPUX86State, 1);
     int sipi = cs->interrupt_request & CPU_INTERRUPT_SIPI;
+    int32_t pc98_a20_mask = env->a20_mask;
 
     *save = *env;
 
@@ -641,6 +642,11 @@ void do_cpu_init(X86CPU *cpu)
            offsetof(CPUX86State, end_init_save) -
            offsetof(CPUX86State, start_init_save));
     g_free(save);
+
+    /* A20 is an external board signal and is not changed by INIT. */
+    if (cpu->pc98_a20_mask) {
+        env->a20_mask = pc98_a20_mask;
+    }
 
     if (kvm_enabled()) {
         kvm_arch_do_init_vcpu(cpu);

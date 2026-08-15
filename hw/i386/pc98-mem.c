@@ -1136,7 +1136,7 @@ void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
         entry += sizeof(*bus);
         bus->type = 1;
         bus->id = irq;
-        memcpy(bus->bus_type, irq ? "PCI   " : "ISA   ", 6);
+        memcpy(bus->bus_type, irq ? "PCI   " : "NEC98 ", 6);
         entry_count++;
     }
     {
@@ -1173,6 +1173,9 @@ void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
     entry_count++;
     pc98_mp_add_interrupt(&entry, 4, 3, 0x0005, 0,
                           X86_CPU(first_cpu)->apic_id, 0);
+    entry_count++;
+    pc98_mp_add_interrupt(&entry, 4, 1, 0x0005, 1,
+                          X86_CPU(first_cpu)->apic_id, 1);
     entry_count++;
 
     g_assert(entry <= image + sizeof(image));

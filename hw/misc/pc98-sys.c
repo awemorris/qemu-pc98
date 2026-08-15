@@ -464,10 +464,18 @@ static uint32_t pc98_timestamp_read(void *opaque, uint32_t addr)
     switch (addr) {
     case 0x5c:
         return ticks & 0xffff;
+    case 0x5d:
+        return (ticks >> 8) & 0xff;
     case 0x5e:
         return (ticks >> 8) & 0xffff;
+    case 0x5f:
+        return (ticks >> 16) & 0xff;
     }
     return 0xffff;
+}
+
+static void pc98_wait_write(void *opaque, uint32_t addr, uint32_t value)
+{
 }
 
 /* --- software DIP switches --- */
@@ -514,8 +522,12 @@ static const MemoryRegionPortio pc98_sys_portio[] = {
     { 0x42, 1, 1, .read = pc98_prnppi_b_read, .write = pc98_prnppi_b_write },
     { 0x44, 1, 1, .read = pc98_prnppi_c_read, .write = pc98_prnppi_c_write },
     { 0x46, 1, 1, .write = pc98_prnppi_ctrl_write },
+    { 0x5c, 1, 1, .read = pc98_timestamp_read },
     { 0x5c, 2, 2, .read = pc98_timestamp_read },
+    { 0x5d, 1, 1, .read = pc98_timestamp_read },
+    { 0x5e, 1, 1, .read = pc98_timestamp_read },
     { 0x5e, 2, 2, .read = pc98_timestamp_read },
+    { 0x5f, 1, 1, .read = pc98_timestamp_read, .write = pc98_wait_write },
     { 0x128, 1, 1, .read = cal_tick_ctl_read, .write = cal_tick_ctl_write },
     { 0x841e, 1, 1, .read = pc98_sdip_read, .write = pc98_sdip_write },
     { 0x851e, 1, 1, .read = pc98_sdip_read, .write = pc98_sdip_write },

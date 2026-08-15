@@ -98,6 +98,8 @@
 #define PC98_MP_FLOAT_ADDR     0x000f4c40
 #define PC98_MP_CONFIG_ADDR    0x000f4c50
 #define PC98_IOAPIC_ID         4
+#define PC98_A20_LATCH_PORT    0x00f2
+#define PC98_A20_COMMAND_PORT  0x00f6
 
 #define PC98_PCM_CLOCK_PORT   0xa466
 #define PC98_PCM_FIFO_PORT    0xa468
@@ -121,7 +123,10 @@ static void test_pc9821_smp_mptable(void)
     uint16_t length;
     uint16_t entry_count;
     unsigned processors = 0;
+    unsigned buses = 0;
     unsigned ioapics = 0;
+    unsigned io_interrupts = 0;
+    unsigned local_interrupts = 0;
     unsigned entries = 0;
     size_t offset = 44;
 
@@ -134,6 +139,7 @@ static void test_pc9821_smp_mptable(void)
 
     qtest_memread(qts, PC98_MP_CONFIG_ADDR, table, sizeof(table));
     g_assert_cmpmem(table, 4, "PCMP", 4);
+    g_assert_cmpuint(table[6], ==, 4);
     length = lduw_le_p(table + 4);
     entry_count = lduw_le_p(table + 34);
     g_assert_cmpuint(length, <=, sizeof(table));
@@ -152,25 +158,107 @@ static void test_pc9821_smp_mptable(void)
                 g_assert_cmpuint(table[offset + 3] & 2, ==, 2);
             }
             processors++;
+        } else if (type == 1) {
+            if (buses == 0) {
+                g_assert_cmpuint(table[offset + 1], ==, 0);
+                g_assert_cmpmem(table + offset + 2, 6, "NEC98 ", 6);
+            } else if (buses == 1) {
+                g_assert_cmpuint(table[offset + 1], ==, 1);
+                g_assert_cmpmem(table + offset + 2, 6, "PCI   ", 6);
+            }
+            buses++;
         } else if (type == 2) {
             g_assert_cmpuint(table[offset + 1], ==, PC98_IOAPIC_ID);
             g_assert_cmpuint(table[offset + 2], ==, 0x11);
             g_assert_cmphex((uint32_t)ldl_le_p(table + offset + 4), ==,
                             0xfec00000);
             ioapics++;
+        } else if (type == 3) {
+            uint8_t interrupt_type = table[offset + 1];
+            uint16_t flags = lduw_le_p(table + offset + 2);
+            uint8_t source_irq = table[offset + 5];
+            uint8_t destination_irq = table[offset + 7];
+
+            if (interrupt_type == 0) {
+                g_assert_cmpuint(source_irq, !=, 7);
+                g_assert_cmpuint(destination_irq, ==,
+                                 source_irq < 7 ? source_irq :
+                                 source_irq - 1);
+                g_assert_cmphex(flags, ==,
+                                source_irq == 14 ? 0x000d : 0x0005);
+            } else {
+                g_assert_cmpuint(interrupt_type, ==, 3);
+                g_assert_cmpuint(destination_irq, ==, 15);
+            }
+            io_interrupts++;
+        } else if (type == 4) {
+            local_interrupts++;
         }
         offset += entry_length;
         entries++;
     }
     g_assert_cmpuint(offset, ==, length);
     g_assert_cmpuint(processors, ==, 4);
+    g_assert_cmpuint(buses, ==, 2);
     g_assert_cmpuint(ioapics, ==, 1);
+    g_assert_cmpuint(io_interrupts, ==, 16);
+    g_assert_cmpuint(local_interrupts, ==, 2);
 
     qtest_writel(qts, 0xfec00000, 0);
     g_assert_cmphex((qtest_readl(qts, 0xfec00010) >> 24) & 0xf, ==,
                     PC98_IOAPIC_ID);
     qtest_writel(qts, 0xfec00000, 1);
     g_assert_cmphex(qtest_readl(qts, 0xfec00010) & 0xff, ==, 0x11);
+    g_assert_false(qtest_qom_get_bool(qts, "/machine/ioapic",
+                                      "irq0-to-gsi2"));
+    qtest_quit(qts);
+}
+
+static void test_pc9821_timestamp_byte_access(void)
+{
+    QTestState *qts = qtest_init("-machine pc9821 -nodefaults "
+                                 "-display none");
+    uint16_t start = qtest_inw(qts, 0x5e);
+    uint16_t later;
+
+    g_assert_cmphex(qtest_inb(qts, 0x5e), ==, start & 0xff);
+    g_assert_cmphex(qtest_inb(qts, 0x5f), ==, start >> 8);
+    qtest_clock_step(qts, 1000000000);
+    later = qtest_inw(qts, 0x5e);
+    g_assert_cmphex(qtest_inb(qts, 0x5e), ==, later & 0xff);
+    g_assert_cmphex(qtest_inb(qts, 0x5f), ==, later >> 8);
+    g_assert_cmphex((uint16_t)(later - start), ==, 1200);
+    qtest_outb(qts, 0x5f, 0);
+    g_assert_cmphex(qtest_inb(qts, 0x5f), ==, later >> 8);
+    qtest_quit(qts);
+}
+
+static unsigned pc98_count_substring(const char *text, const char *needle)
+{
+    unsigned count = 0;
+
+    while ((text = strstr(text, needle))) {
+        count++;
+        text += strlen(needle);
+    }
+    return count;
+}
+
+static void test_pc9821_smp_a20_gate(void)
+{
+    QTestState *qts = qtest_init("-machine pc9821 -cpu pentium2 -smp 4 "
+                                 "-nodefaults -display none");
+    g_autofree char *registers = qtest_hmp(qts, "info registers -a");
+
+    g_assert_cmpuint(pc98_count_substring(registers, "A20=0"), ==, 4);
+    qtest_outb(qts, PC98_A20_LATCH_PORT, 0);
+    g_clear_pointer(&registers, g_free);
+    registers = qtest_hmp(qts, "info registers -a");
+    g_assert_cmpuint(pc98_count_substring(registers, "A20=1"), ==, 4);
+    qtest_outb(qts, PC98_A20_COMMAND_PORT, 0x03);
+    g_clear_pointer(&registers, g_free);
+    registers = qtest_hmp(qts, "info registers -a");
+    g_assert_cmpuint(pc98_count_substring(registers, "A20=0"), ==, 4);
     qtest_quit(qts);
 }
 #define PC98_PCM_DACTRL_PORT  0xa46a
@@ -1383,6 +1471,10 @@ int main(int argc, char **argv)
                    test_pc9821_pegc_selection);
     qtest_add_func("/pc98/pc9821/smp-mptable",
                    test_pc9821_smp_mptable);
+    qtest_add_func("/pc98/pc9821/timestamp-byte-access",
+                   test_pc9821_timestamp_byte_access);
+    qtest_add_func("/pc98/pc9821/smp-a20-gate",
+                   test_pc9821_smp_a20_gate);
     qtest_add_func("/pc98/pc9821/usb-pci-io-mmio-irq",
                    test_pc9821_usb_pci_io_mmio_irq);
     qtest_add_func("/pc98/lgy98/port-map",

@@ -151,7 +151,12 @@ static bool pc98_a20_enabled(void)
 
 static void pc98_a20_drive(Pc98MachineState *pms, bool enabled)
 {
-    x86_cpu_set_a20(X86_CPU(first_cpu), enabled);
+    CPUState *cs;
+
+    /* The gate is a board signal shared by the BSP and every AP. */
+    CPU_FOREACH(cs) {
+        x86_cpu_set_a20(X86_CPU(cs), enabled);
+    }
     if (pms->mem) {
         pc98_mem_set_a20_wrap(pms->mem, !enabled);
     }
@@ -196,11 +201,9 @@ static void pc98_soft_reset(Pc98MachineState *pms)
     if (pc98_sys_shutdown_armed(pms->sys)) {
         qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
     } else {
+        /* A 286-style reset closes the board-level A20 gate as before. */
+        pc98_a20_drive(pms, false);
         cpu_interrupt(first_cpu, CPU_INTERRUPT_INIT);
-        /* the INIT re-masks A20 in the CPU; keep the wrap window in step */
-        if (pms->mem) {
-            pc98_mem_set_a20_wrap(pms->mem, true);
-        }
     }
 }
 
@@ -339,6 +342,7 @@ static void pc98_smp_ioapic_init(Pc98MachineState *pms,
 
     object_property_add_child(OBJECT(pms), "ioapic", OBJECT(dev));
     qdev_prop_set_uint8(dev, "version", 0x11);
+    qdev_prop_set_bit(dev, "irq0-to-gsi2", false);
     sysbus_realize_and_unref(sbd, &error_fatal);
     sysbus_mmio_map(sbd, 0, IO_APIC_DEFAULT_ADDRESS);
     IOAPIC_COMMON(dev)->id = PC98_IOAPIC_ID;

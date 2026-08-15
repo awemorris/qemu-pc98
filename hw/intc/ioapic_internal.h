@@ -105,6 +105,8 @@ struct IOAPICCommonState {
     uint64_t ioredtbl[IOAPIC_NUM_PINS];
     Notifier machine_done;
     uint8_t version;
+    /* PC/ISA remaps IRQ0 to pin 2; other boards may wire it to pin 0. */
+    bool irq0_to_gsi2;
     uint64_t irq_count[IOAPIC_NUM_PINS];
     int irq_level[IOAPIC_NUM_PINS];
     int irq_eoi[IOAPIC_NUM_PINS];

@@ -42,7 +42,6 @@ typedef struct Pc98CoreGraphState {
     CirrusVGAState cirrus;
 
     MemoryRegion control_io;
-    MemoryRegion wait_io;
     MemoryRegion video_enable_io;
     MemoryRegion io_ca0;
     MemoryRegion io_ba4;
@@ -326,26 +325,6 @@ static void coregraph_control_write(void *opaque, hwaddr addr,
 static const MemoryRegionOps coregraph_control_ops = {
     .read = coregraph_control_read,
     .write = coregraph_control_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid = {
-        .min_access_size = 1,
-        .max_access_size = 1,
-    },
-};
-
-static uint64_t coregraph_wait_read(void *opaque, hwaddr addr, unsigned size)
-{
-    return 0xff;
-}
-
-static void coregraph_wait_write(void *opaque, hwaddr addr,
-                                 uint64_t value, unsigned size)
-{
-}
-
-static const MemoryRegionOps coregraph_wait_ops = {
-    .read = coregraph_wait_read,
-    .write = coregraph_wait_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 1,
@@ -883,10 +862,6 @@ static void coregraph_realize(PCIDevice *dev, Error **errp)
     memory_region_init_io(&s->control_io, owner, &coregraph_control_ops, s,
                           "coregraph-control", 2);
     memory_region_add_subregion(get_system_io(), 0x0faa, &s->control_io);
-    memory_region_init_io(&s->wait_io, owner, &coregraph_wait_ops, s,
-                          "coregraph-wait", 1);
-    memory_region_add_subregion(get_system_io(), 0x005f, &s->wait_io);
-
     memory_region_init_io(&s->video_enable_io, owner,
                           &coregraph_video_enable_ops, s,
                           "coregraph-video-enable", 1);
