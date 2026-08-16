@@ -35,6 +35,7 @@
 #include "qemu/timer.h"
 #include "hw/core/irq.h"
 #include "hw/core/loader.h"
+#include "hw/display/pc98-pegc.h"
 #include "hw/display/pc98-vga.h"
 #include "hw/i386/pc98.h"
 #include "system/ioport.h"
@@ -234,6 +235,7 @@ struct VGAState {
     uint16_t pegc_bank_1;
     uint16_t pegc_mmio_mode;
     uint16_t pegc_mmio_framebuffer;
+    Pc98PegcPlaneState pegc_plane;
 
     uint16_t font_code;
     uint8_t font_line;
@@ -3754,6 +3756,10 @@ static uint32_t vram_readb(void *opaque, hwaddr addr)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            return pc98_pegc_plane_vram_read(&s->pegc_plane, s->pegc_post,
+                                             addr, 1);
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         return s->pegc_post[(bank & 0x0f) * 0x8000 + (addr & 0x7fff)];
@@ -3773,6 +3779,10 @@ static uint32_t vram_readw(void *opaque, hwaddr addr)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            return pc98_pegc_plane_vram_read(&s->pegc_plane, s->pegc_post,
+                                             addr, 2);
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         return lduw_le_p(s->pegc_post +
@@ -3794,6 +3804,10 @@ static uint32_t vram_readl(void *opaque, hwaddr addr)
     uint32_t value;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            return pc98_pegc_plane_vram_read(&s->pegc_plane, s->pegc_post,
+                                             addr, 4);
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         return ldl_le_p(s->pegc_post +
@@ -3818,6 +3832,11 @@ static void vram_writeb(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            pc98_pegc_plane_vram_write(&s->pegc_plane, s->pegc_post,
+                                       addr, value, 1);
+            return;
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         s->pegc_post[(bank & 0x0f) * 0x8000 + (addr & 0x7fff)] = value;
@@ -3840,6 +3859,14 @@ static void vram_writew(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            uint8_t dirty = pc98_pegc_plane_vram_write(
+                &s->pegc_plane, s->pegc_post, addr, value, 2);
+
+            s->dirty |= (dirty & 1 ? DIRTY_VRAM0 : 0) |
+                        (dirty & 2 ? DIRTY_VRAM1 : 0);
+            return;
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         stw_le_p(s->pegc_post +
@@ -3863,6 +3890,14 @@ static void vram_writel(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
+        if (s->pegc_enabled && (s->pegc_mmio_mode & 1)) {
+            uint8_t dirty = pc98_pegc_plane_vram_write(
+                &s->pegc_plane, s->pegc_post, addr, value, 4);
+
+            s->dirty |= (dirty & 1 ? DIRTY_VRAM0 : 0) |
+                        (dirty & 2 ? DIRTY_VRAM1 : 0);
+            return;
+        }
         uint16_t bank = addr < 0x8000 ? s->pegc_bank_0 : s->pegc_bank_1;
 
         stl_le_p(s->pegc_post +
@@ -3918,65 +3953,105 @@ static void vram_b0000_writel(void *opaque, hwaddr addr, uint32_t value)
  * selectors needed by the Xa7 POST while 256-colour mode is selected.
  */
 
+static uint32_t vram_e0000_pegc_read(VGAState *s, hwaddr addr,
+                                     unsigned size)
+{
+    uint32_t offset = addr & 0x7fff;
+
+    switch (offset) {
+    case 0x0004:
+        if (size == 4) {
+            return s->pegc_bank_0 | ((uint32_t)s->pegc_bank_1 << 16);
+        }
+        return s->pegc_bank_0;
+    case 0x0005:
+        return size == 1 ? s->pegc_bank_0 >> 8 : 0;
+    case 0x0006:
+        return s->pegc_bank_1;
+    case 0x0007:
+        return size == 1 ? s->pegc_bank_1 >> 8 : 0;
+    case 0x0100:
+        if (size == 4) {
+            return s->pegc_mmio_mode |
+                   ((uint32_t)s->pegc_mmio_framebuffer << 16);
+        }
+        return s->pegc_mmio_mode;
+    case 0x0101:
+        return size == 1 ? s->pegc_mmio_mode >> 8 : 0;
+    case 0x0102:
+        return s->pegc_mmio_framebuffer;
+    case 0x0103:
+        return size == 1 ? s->pegc_mmio_framebuffer >> 8 : 0;
+    default:
+        if (offset >= 0x0104 && offset < 0x01a0) {
+            return pc98_pegc_plane_reg_read(&s->pegc_plane,
+                                            offset - 0x0100, size);
+        }
+        return size == 1 ? 0xff : size == 2 ? 0xffff : UINT32_MAX;
+    }
+}
+
+static void vram_e0000_pegc_write(VGAState *s, hwaddr addr, uint32_t value,
+                                  unsigned size)
+{
+    uint32_t offset = addr & 0x7fff;
+
+    switch (offset) {
+    case 0x0004:
+        s->pegc_bank_0 = value & 0x0f;
+        if (size == 4) {
+            s->pegc_bank_1 = (value >> 16) & 0x0f;
+        }
+        break;
+    case 0x0006:
+        s->pegc_bank_1 = value & 0x0f;
+        break;
+    case 0x0100:
+        s->pegc_mmio_mode = value & 1;
+        pc98_pegc_plane_restart(&s->pegc_plane);
+        if (size == 4) {
+            s->pegc_mmio_framebuffer = (value >> 16) & 3;
+            s->dirty |= DIRTY_VRAM0 | DIRTY_VRAM1 | DIRTY_DISPLAY;
+        }
+        break;
+    case 0x0102:
+        s->pegc_mmio_framebuffer = value & 3;
+        s->dirty |= DIRTY_VRAM0 | DIRTY_VRAM1 | DIRTY_DISPLAY;
+        break;
+    default:
+        if (offset >= 0x0104 && offset < 0x01a0) {
+            pc98_pegc_plane_reg_write(&s->pegc_plane, offset - 0x0100,
+                                      value, size);
+        }
+        break;
+    }
+}
+
 static uint32_t vram_e0000_readb(void *opaque, hwaddr addr)
 {
     VGAState *s = opaque;
 
-    if (s->mode2[MODE2_256COLOR]) {
-        switch (addr & 0x7fff) {
-        case 0x0004:
-            return s->pegc_bank_0 & 0xff;
-        case 0x0005:
-            return s->pegc_bank_0 >> 8;
-        case 0x0006:
-            return s->pegc_bank_1 & 0xff;
-        case 0x0007:
-            return s->pegc_bank_1 >> 8;
-        case 0x0100:
-            return s->pegc_mmio_mode & 0xff;
-        case 0x0101:
-            return s->pegc_mmio_mode >> 8;
-        case 0x0102:
-            return s->pegc_mmio_framebuffer & 0xff;
-        case 0x0103:
-            return s->pegc_mmio_framebuffer >> 8;
-        default:
-            return 0xff;
-        }
-    }
-    return vram_readb(opaque, addr + 0x18000);
+    return s->mode2[MODE2_256COLOR] ?
+           vram_e0000_pegc_read(s, addr, 1) :
+           vram_readb(opaque, addr + 0x18000);
 }
 
 static uint32_t vram_e0000_readw(void *opaque, hwaddr addr)
 {
     VGAState *s = opaque;
 
-    if (s->mode2[MODE2_256COLOR]) {
-        switch (addr & 0x7fff) {
-        case 0x0004:
-            return s->pegc_bank_0;
-        case 0x0006:
-            return s->pegc_bank_1;
-        case 0x0100:
-            return s->pegc_mmio_mode;
-        case 0x0102:
-            return s->pegc_mmio_framebuffer;
-        default:
-            return 0xffff;
-        }
-    }
-    return vram_readw(opaque, addr + 0x18000);
+    return s->mode2[MODE2_256COLOR] ?
+           vram_e0000_pegc_read(s, addr, 2) :
+           vram_readw(opaque, addr + 0x18000);
 }
 
 static uint32_t vram_e0000_readl(void *opaque, hwaddr addr)
 {
     VGAState *s = opaque;
 
-    if (s->mode2[MODE2_256COLOR]) {
-        return vram_e0000_readw(opaque, addr) |
-               (vram_e0000_readw(opaque, addr + 2) << 16);
-    }
-    return vram_readl(opaque, addr + 0x18000);
+    return s->mode2[MODE2_256COLOR] ?
+           vram_e0000_pegc_read(s, addr, 4) :
+           vram_readl(opaque, addr + 0x18000);
 }
 
 static void vram_e0000_writeb(void *opaque, hwaddr addr, uint32_t value)
@@ -3984,25 +4059,10 @@ static void vram_e0000_writeb(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
-        switch (addr & 0x7fff) {
-        case 0x0004:
-            s->pegc_bank_0 = value;
-            break;
-        case 0x0006:
-            s->pegc_bank_1 = value;
-            break;
-        case 0x0100:
-            /* Only packed/planar selection bit 0 is writable. */
-            s->pegc_mmio_mode = value & 1;
-            break;
-        case 0x0102:
-            s->pegc_mmio_framebuffer = value & 3;
-            s->dirty |= DIRTY_VRAM0 | DIRTY_VRAM1 | DIRTY_DISPLAY;
-            break;
-        }
-        return;
+        vram_e0000_pegc_write(s, addr, value, 1);
+    } else {
+        vram_writeb(opaque, addr + 0x18000, value);
     }
-    vram_writeb(opaque, addr + 0x18000, value);
 }
 
 static void vram_e0000_writew(void *opaque, hwaddr addr, uint32_t value)
@@ -4010,24 +4070,10 @@ static void vram_e0000_writew(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
-        switch (addr & 0x7fff) {
-        case 0x0004:
-            s->pegc_bank_0 = value;
-            break;
-        case 0x0006:
-            s->pegc_bank_1 = value;
-            break;
-        case 0x0100:
-            s->pegc_mmio_mode = value & 1;
-            break;
-        case 0x0102:
-            s->pegc_mmio_framebuffer = value & 3;
-            s->dirty |= DIRTY_VRAM0 | DIRTY_VRAM1 | DIRTY_DISPLAY;
-            break;
-        }
-        return;
+        vram_e0000_pegc_write(s, addr, value, 2);
+    } else {
+        vram_writew(opaque, addr + 0x18000, value);
     }
-    vram_writew(opaque, addr + 0x18000, value);
 }
 
 static void vram_e0000_writel(void *opaque, hwaddr addr, uint32_t value)
@@ -4035,11 +4081,10 @@ static void vram_e0000_writel(void *opaque, hwaddr addr, uint32_t value)
     VGAState *s = opaque;
 
     if (s->mode2[MODE2_256COLOR]) {
-        vram_e0000_writew(opaque, addr, value);
-        vram_e0000_writew(opaque, addr + 2, value >> 16);
-        return;
+        vram_e0000_pegc_write(s, addr, value, 4);
+    } else {
+        vram_writel(opaque, addr + 0x18000, value);
     }
-    vram_writel(opaque, addr + 0x18000, value);
 }
 
 static bool pegc_framebuffer_mapped(VGAState *s)
@@ -4742,6 +4787,7 @@ static void pc98_vga_reset(void *opaque)
     s->pegc_bank_1 = 0;
     s->pegc_mmio_mode = 0;
     s->pegc_mmio_framebuffer = 0;
+    pc98_pegc_plane_reset(&s->pegc_plane);
 
     s->vram16_disp_b = s->vram16 + 0x00000;
     s->vram16_disp_r = s->vram16 + 0x08000;
@@ -4889,6 +4935,30 @@ static const VMStateDescription vmstate_pc98_egc = {
     }
 };
 
+static const VMStateDescription vmstate_pc98_pegc_plane = {
+    .name = "pc98-vga/pegc-plane",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT8(plane_access, Pc98PegcPlaneState),
+        VMSTATE_UINT16(rop, Pc98PegcPlaneState),
+        VMSTATE_UINT8(data_select, Pc98PegcPlaneState),
+        VMSTATE_UINT32(mask, Pc98PegcPlaneState),
+        VMSTATE_UINT16(length, Pc98PegcPlaneState),
+        VMSTATE_UINT16(shift, Pc98PegcPlaneState),
+        VMSTATE_UINT8(palette1, Pc98PegcPlaneState),
+        VMSTATE_UINT8(palette2, Pc98PegcPlaneState),
+        VMSTATE_UINT32_ARRAY(pattern, Pc98PegcPlaneState, 8),
+        VMSTATE_UINT8_ARRAY(source_fifo, Pc98PegcPlaneState,
+                            PC98_PEGC_SOURCE_FIFO_SIZE),
+        VMSTATE_UINT8(source_len, Pc98PegcPlaneState),
+        VMSTATE_UINT16(remaining, Pc98PegcPlaneState),
+        VMSTATE_UINT8(transfer_active, Pc98PegcPlaneState),
+        VMSTATE_UINT8(first_write, Pc98PegcPlaneState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static int pc98_vga_pre_save(void *opaque)
 {
     VGAState *s = opaque;
@@ -4897,6 +4967,10 @@ static int pc98_vga_pre_save(void *opaque)
         s->egc.inptr > s->egc.buf + sizeof(s->egc.buf) ||
         s->egc.outptr < s->egc.buf ||
         s->egc.outptr > s->egc.buf + sizeof(s->egc.buf)) {
+        return -EINVAL;
+    }
+    if (s->pegc_plane.source_len > PC98_PEGC_SOURCE_FIFO_SIZE ||
+        s->pegc_plane.remaining > 4096) {
         return -EINVAL;
     }
     s->egc_in_offset = s->egc.inptr - s->egc.buf;
@@ -4915,6 +4989,12 @@ static int pc98_vga_post_load(void *opaque, int version_id)
         s->gdc_gfx.data_count < 0 || s->gdc_gfx.data_count > GDC_BUFFERS ||
         s->egc_in_offset > sizeof(s->egc.buf) ||
         s->egc_out_offset > sizeof(s->egc.buf)) {
+        return -EINVAL;
+    }
+    if (version_id < 3) {
+        pc98_pegc_plane_reset(&s->pegc_plane);
+    } else if (s->pegc_plane.source_len > PC98_PEGC_SOURCE_FIFO_SIZE ||
+               s->pegc_plane.remaining > 4096) {
         return -EINVAL;
     }
 
@@ -4937,7 +5017,7 @@ static int pc98_vga_post_load(void *opaque, int version_id)
 
 static const VMStateDescription vmstate_pc98_vga = {
     .name = "pc98-vga",
-    .version_id = 2,
+    .version_id = 3,
     .minimum_version_id = 1,
     .pre_save = pc98_vga_pre_save,
     .post_load = pc98_vga_post_load,
@@ -4975,6 +5055,8 @@ static const VMStateDescription vmstate_pc98_vga = {
         VMSTATE_UINT16(pegc_bank_1, VGAState),
         VMSTATE_UINT16_V(pegc_mmio_mode, VGAState, 2),
         VMSTATE_UINT16_V(pegc_mmio_framebuffer, VGAState, 2),
+        VMSTATE_STRUCT(pegc_plane, VGAState, 3, vmstate_pc98_pegc_plane,
+                       Pc98PegcPlaneState),
         VMSTATE_UINT16(font_code, VGAState),
         VMSTATE_UINT8(font_line, VGAState),
         VMSTATE_UINT8(blink, VGAState),

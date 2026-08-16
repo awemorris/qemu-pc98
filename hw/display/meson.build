@@ -20,7 +20,8 @@ system_ss.add(when: 'CONFIG_XEN_BUS', if_true: files('xenfb.c'))
 
 system_ss.add(when: 'CONFIG_VGA_PCI', if_true: files('vga-pci.c'))
 system_ss.add(when: 'CONFIG_VGA_ISA', if_true: files('vga-isa.c'))
-system_ss.add(when: 'CONFIG_PC98_VGA', if_true: files('pc98-vga.c'))
+system_ss.add(when: 'CONFIG_PC98_VGA',
+              if_true: files('pc98-vga.c', 'pc98-pegc.c'))
 system_ss.add(when: 'CONFIG_PC98_WAB', if_true: files('pc98-wab.c'))
 system_ss.add(when: ['CONFIG_PC98', 'CONFIG_VGA_CIRRUS'],
               if_true: files('pc98-coregraph.c'))

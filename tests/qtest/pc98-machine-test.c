@@ -93,6 +93,8 @@
 #define PC98_MODE_FF2         0x006a
 #define PC98_MODE_STATUS      0x09a0
 #define PC98_PEGC_CONTROL     0x000e0000
+#define PC98_PEGC_PLANE_A     0x000a8000
+#define PC98_PEGC_PLANE_B     0x000b0000
 #define PC98_PEGC_APERTURE    0x0f00000
 #define PC98_PEGC_HIGH_ALIAS  0xfff00000
 #define PC98_MP_FLOAT_ADDR     0x000f4c40
@@ -438,6 +440,102 @@ static void test_pc9821_pegc_selection(void)
     qtest_outb(qts, PC98_MODE_FF2, 0x69);
     qtest_outb(qts, PC98_MODE_STATUS, 0x0d);
     g_assert_cmphex(qtest_inb(qts, PC98_MODE_STATUS) & 1, ==, 1);
+    qtest_quit(qts);
+}
+
+static QTestState *pc98_pegc_test_init(void)
+{
+    QTestState *qts = qtest_init(
+        "-machine pc9821,pegc=on -m 16M -nodefaults -display none");
+
+    qtest_outb(qts, PC98_MODE_FF2, 0x07);
+    qtest_outb(qts, PC98_MODE_FF2, 0x21);
+    qtest_outb(qts, PC98_MODE_STATUS, 0x0a);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x102, 1);
+    return qts;
+}
+
+static void test_pc9821_pegc_plane_rop(void)
+{
+    QTestState *qts = pc98_pegc_test_init();
+    uint8_t source[32];
+    uint8_t clear[64] = { 0 };
+    unsigned i;
+
+    qtest_memwrite(qts, PC98_PEGC_APERTURE, clear, sizeof(clear));
+
+    /* A dword access spans both packed-pixel bank selectors. */
+    qtest_writel(qts, PC98_PEGC_CONTROL + 4, 0x00030002);
+    g_assert_cmphex(qtest_readl(qts, PC98_PEGC_CONTROL + 4), ==,
+                    0x00030002);
+
+    /* Register masks and pixel-oriented pattern layout. */
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x110, 0xffff);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x112, 0xffff);
+    g_assert_cmphex(qtest_readw(qts, PC98_PEGC_CONTROL + 0x110), ==,
+                    0x0fff);
+    g_assert_cmphex(qtest_readw(qts, PC98_PEGC_CONTROL + 0x112), ==,
+                    0x1f1f);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0x8000);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x120, 0x5a);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_CONTROL + 0x120), ==, 0x5a);
+
+    /* CPU-source simple update fills 32 packed pixels through one dword. */
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x100, 1);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x104, 0);
+    qtest_writel(qts, PC98_PEGC_CONTROL + 0x10c, UINT32_MAX);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x110, 31);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x112, 0);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0x0100);
+    qtest_writel(qts, PC98_PEGC_PLANE_A, UINT32_MAX);
+    for (i = 0; i < 32; i++) {
+        g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + i), ==,
+                        0xff);
+    }
+
+    /* Disabled planes are preserved by the simple-update path. */
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0x55);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x104, 0xf0);
+    qtest_writel(qts, PC98_PEGC_CONTROL + 0x10c, 0x80);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x110, 0);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0x0100);
+    qtest_writew(qts, PC98_PEGC_PLANE_A, 0x0080);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0x5f);
+
+    /* ROP 0xaa copies P; pattern method 2 selects palette register 1. */
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x104, 0);
+    qtest_writel(qts, PC98_PEGC_CONTROL + 0x10c, 0x80);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x110, 0);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x114, 0xa6);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0x19aa);
+    qtest_writew(qts, PC98_PEGC_PLANE_A, 0);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0xa6);
+
+    /* Palette comparison returns one for the matching first pixel only. */
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x10a, 1);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0);
+    g_assert_cmphex(qtest_readw(qts, PC98_PEGC_PLANE_A), ==, 0x0080);
+
+    /* The source shifter carries prefetched pixels across plane writes. */
+    for (i = 0; i < sizeof(source); i++) {
+        source[i] = i;
+    }
+    qtest_memwrite(qts, PC98_PEGC_APERTURE, source, sizeof(source));
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x10a, 0);
+    qtest_writeb(qts, PC98_PEGC_CONTROL + 0x104, 0);
+    qtest_writel(qts, PC98_PEGC_CONTROL + 0x10c, 0xffff);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x110, 15);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x112, 2);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x108, 0);
+    qtest_readw(qts, PC98_PEGC_PLANE_A);
+    qtest_readw(qts, PC98_PEGC_PLANE_A + 2);
+    qtest_writew(qts, PC98_PEGC_PLANE_B, 0);
+    for (i = 0; i < 16; i++) {
+        g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + 0x40000 + i),
+                        ==, i + 2);
+    }
+
     qtest_quit(qts);
 }
 
@@ -1500,6 +1598,8 @@ int main(int argc, char **argv)
                    test_pc9801_low_memory_workarea);
     qtest_add_func("/pc98/pc9821/pegc-selection",
                    test_pc9821_pegc_selection);
+    qtest_add_func("/pc98/pc9821/pegc-plane-rop",
+                   test_pc9821_pegc_plane_rop);
     qtest_add_func("/pc98/pc9821/smp-mptable-2",
                    test_pc9821_smp_mptable_2);
     qtest_add_func("/pc98/pc9821/smp-mptable-3",
