@@ -2,6 +2,7 @@
 
 tests_i386_system_quick = [
   'migration',
+  'pc98_fdd_boot',
 ]
 
 tests_i386_system_thorough = [

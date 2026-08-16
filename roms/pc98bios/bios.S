@@ -2896,6 +2896,9 @@ fdd_fifo_read:
  * Floppy IPL.  Sector 18 exists on a 1.44-MiB disk, but not on either the
  * native 8x1024-byte PC-98 format or the 15x512-byte 1.2-MiB format.  Probe
  * it first, then use result N to distinguish the two AL=90h sector sizes.
+ *
+ * PC-98 firmware does not require the IBM PC 55AA boot-sector signature.
+ * A successful sector read is the bootability criterion for every format.
  */
 fdd_boot:
 	movw	$FDC_CTRL, %dx
@@ -2950,8 +2953,6 @@ fdd_boot:
 	jc	fdd_boot_failed
 
 fdd_boot_12m_loaded:
-	cmpw	$0xaa55, %es:510
-	jne	fdd_boot_failed
 	xorw	%ax, %ax
 	movw	%ax, %ds
 	movb	$0x90, BOOT_DEVICE
@@ -2975,8 +2976,6 @@ fdd_boot_144m:
 	movb	$18, %ah
 	call	fdd_read_one
 	jc	fdd_boot_failed
-	cmpw	$0xaa55, %es:510
-	jne	fdd_boot_failed
 	xorw	%ax, %ax
 	movw	%ax, %ds
 	movb	$0x30, BOOT_DEVICE
