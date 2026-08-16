@@ -81,6 +81,18 @@ hole and therefore reports 1 MiB less low memory.  It is accepted only on
 ``pc9821`` and only with QEMU's free compatibility BIOS; QEMU rejects it when
 a vendor BIOS dump is selected.
 
+Core-Graph and its internal Cirrus GD5430 are enabled by default.  To test or
+use the native PEGC without allowing the guest to select Cirrus, combine PEGC
+with ``coregraph=off``:
+
+.. code-block:: console
+
+   qemu-system-i386 -M pc9821,pegc=on,coregraph=off -L <romdir> \
+       -drive if=ide,format=raw,file=hdd.raw
+
+This keeps the PCI host bridge but omits the Core-Graph PCI function and its
+non-PnP Cirrus child.
+
 Supported devices
 -----------------
 
@@ -104,9 +116,10 @@ Supported devices
   and the 8/16-colour planar modes.  ``pc9821`` retains the PEGC subset
   required by the stock Xa7 ROM for its 640x400 packed-pixel POST.  With
   ``pegc=on``, the compatibility BIOS additionally advertises PEGC and the
-  display supports the 640x480 packed-pixel mode, linear VRAM aperture, two
-  bank selectors and 256-colour palette used by Windows setup.  Accelerated
-  graphics use Cirrus through Core-Graph.
+  display supports the 640x480 packed-pixel mode, linear VRAM aperture,
+  banked and plane access, ROPs, masks, shifts and the 256-colour palette.
+  Core-Graph/Cirrus remains the default accelerated display and can be
+  omitted with ``coregraph=off``.
 
 The PEGC aperture occupies ``0xf00000`` through ``0xf7ffff``.  With the
 default ``pegc=off`` it is present only while the 16 MiB system space is

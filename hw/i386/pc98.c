@@ -109,6 +109,7 @@ struct Pc98MachineState {
     uint8_t shutdown_index;
     uint8_t ioapic_id;
     bool pegc_enabled;
+    bool coregraph_enabled;
     bool smp_enabled;
 
     PortioList portio_list;
@@ -139,6 +140,16 @@ static bool pc98_machine_get_pegc(Object *obj, Error **errp)
 static void pc98_machine_set_pegc(Object *obj, bool value, Error **errp)
 {
     PC98_MACHINE(obj)->pegc_enabled = value;
+}
+
+static bool pc98_machine_get_coregraph(Object *obj, Error **errp)
+{
+    return PC98_MACHINE(obj)->coregraph_enabled;
+}
+
+static void pc98_machine_set_coregraph(Object *obj, bool value, Error **errp)
+{
+    PC98_MACHINE(obj)->coregraph_enabled = value;
 }
 
 /*
@@ -524,7 +535,7 @@ static void pc98_devices_init(Pc98MachineState *pms)
         pci_bus = pc98_pci_get_bus(host);
         /* wire dev0 config reg 0x64 (D000 window shadow) to the mem controller */
         pc98_pci_set_d000_mem(pms->mem);
-        if (pmc->has_coregraph) {
+        if (pmc->has_coregraph && pms->coregraph_enabled) {
             PCIDevice *coregraph =
                 pci_new(PCI_DEVFN(7, 0), TYPE_PC98_COREGRAPH);
 
@@ -628,6 +639,14 @@ static void pc98_machine_state_init(MachineState *machine)
 
     pc98_devices_init(pms);
     vmstate_register(NULL, 0, &vmstate_pc98_machine, pms);
+}
+
+static void pc98_machine_instance_init(Object *obj)
+{
+    Pc98MachineState *pms = PC98_MACHINE(obj);
+
+    /* Preserve the historical pc9821 device graph unless explicitly off. */
+    pms->coregraph_enabled = true;
 }
 
 static void pc98_machine_reset(MachineState *machine, ResetType type)
@@ -744,6 +763,13 @@ static void pc9821_class_init(ObjectClass *oc, const void *data)
     pmc->supports_pegc = true;
     pmc->supports_smp = true;
 
+    object_class_property_add_bool(oc, "coregraph",
+                                   pc98_machine_get_coregraph,
+                                   pc98_machine_set_coregraph);
+    object_class_property_set_description(
+        oc, "coregraph",
+        "Enable the built-in Core-Graph/Cirrus display (default: on)");
+
     compat_props_add(mc->compat_props, pc98_compat_props,
                      G_N_ELEMENTS(pc98_compat_props));
 }
@@ -753,6 +779,7 @@ static const TypeInfo pc98_machine_types[] = {
         .name          = TYPE_PC98_MACHINE,
         .parent        = TYPE_X86_MACHINE,
         .instance_size = sizeof(Pc98MachineState),
+        .instance_init = pc98_machine_instance_init,
         .class_size    = sizeof(Pc98MachineClass),
         .class_init    = pc98_class_init,
         .abstract      = true,

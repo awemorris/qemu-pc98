@@ -374,6 +374,14 @@ static void test_pc9821_has_pci_coregraph(void)
     g_assert_nonnull(strstr(qtree, "dev: pc98-coregraph"));
 }
 
+static void test_pc9821_coregraph_off(void)
+{
+    g_autofree char *qtree = pc98_qtree("pc9821,coregraph=off");
+
+    g_assert_nonnull(strstr(qtree, "dev: pc98-pcihost"));
+    g_assert_null(strstr(qtree, "dev: pc98-coregraph"));
+}
+
 static void test_pc9801_low_memory_workarea(void)
 {
     QTestState *qts;
@@ -446,7 +454,8 @@ static void test_pc9821_pegc_selection(void)
 static QTestState *pc98_pegc_test_init(void)
 {
     QTestState *qts = qtest_init(
-        "-machine pc9821,pegc=on -m 16M -nodefaults -display none");
+        "-machine pc9821,pegc=on,coregraph=off "
+        "-m 16M -nodefaults -display none");
 
     qtest_outb(qts, PC98_MODE_FF2, 0x07);
     qtest_outb(qts, PC98_MODE_FF2, 0x21);
@@ -1594,6 +1603,8 @@ int main(int argc, char **argv)
                    test_pc9801_has_no_pci);
     qtest_add_func("/pc98/pc9821/pci-coregraph",
                    test_pc9821_has_pci_coregraph);
+    qtest_add_func("/pc98/pc9821/coregraph-off",
+                   test_pc9821_coregraph_off);
     qtest_add_func("/pc98/pc9801/low-memory-workarea",
                    test_pc9801_low_memory_workarea);
     qtest_add_func("/pc98/pc9821/pegc-selection",
