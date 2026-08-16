@@ -56,7 +56,7 @@ With the firmware in ``<romdir>`` and a bootable floppy image:
 
 Use ``-M pc9821`` instead when the PCI/Core-Graph machine is required.
 
-The ``pc9821`` machine supports one to four processors.  SMP requires a
+The ``pc9821`` machine supports one to eight processors.  SMP requires a
 Pentium II or later CPU model with a local APIC and QEMU's free compatibility
 BIOS.  QEMU supplies an Intel MPS 1.4 table with the PC-98 native bus named
 ``NEC98`` and the PC-98 I/O APIC routing; the firmware does not start
@@ -84,7 +84,7 @@ a vendor BIOS dump is selected.
 Supported devices
 -----------------
 
-* One CPU on ``pc9801``; one to four CPUs on ``pc9821``.  SMP uses local APICs,
+* One CPU on ``pc9801``; one to eight CPUs on ``pc9821``.  SMP uses local APICs,
   an I/O APIC and an Intel MPS 1.4 table as described above.
 * Interrupt controllers: a master/slave 8259A pair with the cascade on IRQ 7
   (the PC/AT uses IRQ 2), reachable at the stride-2 PC-98 ports.  In SMP mode,

@@ -97,7 +97,7 @@
 #define PC98_PEGC_HIGH_ALIAS  0xfff00000
 #define PC98_MP_FLOAT_ADDR     0x000f4c40
 #define PC98_MP_CONFIG_ADDR    0x000f4c50
-#define PC98_IOAPIC_ID         4
+#define PC98_LEGACY_IOAPIC_ID  4
 #define PC98_A20_LATCH_PORT    0x00f2
 #define PC98_A20_COMMAND_PORT  0x00f6
 
@@ -114,10 +114,13 @@ static uint8_t pc98_test_checksum(const uint8_t *data, size_t length)
     return sum;
 }
 
-static void test_pc9821_smp_mptable(void)
+static void test_pc9821_smp_mptable_count(unsigned expected_processors)
 {
-    QTestState *qts = qtest_init("-machine pc9821 -cpu pentium2 -smp 4 "
-                                 "-nodefaults -display none");
+    QTestState *qts = qtest_initf("-machine pc9821 -cpu pentium2 -smp %u "
+                                  "-nodefaults -display none",
+                                  expected_processors);
+    unsigned expected_ioapic_id = MAX(PC98_LEGACY_IOAPIC_ID,
+                                      expected_processors);
     uint8_t floating[16];
     uint8_t table[512];
     uint16_t length;
@@ -154,6 +157,7 @@ static void test_pc9821_smp_mptable(void)
         g_assert_cmpuint(offset + entry_length, <=, length);
         if (type == 0) {
             g_assert_cmpuint(table[offset + 3] & 1, ==, 1);
+            g_assert_cmpuint(table[offset + 1], ==, processors);
             if (processors == 0) {
                 g_assert_cmpuint(table[offset + 3] & 2, ==, 2);
             }
@@ -168,7 +172,7 @@ static void test_pc9821_smp_mptable(void)
             }
             buses++;
         } else if (type == 2) {
-            g_assert_cmpuint(table[offset + 1], ==, PC98_IOAPIC_ID);
+            g_assert_cmpuint(table[offset + 1], ==, expected_ioapic_id);
             g_assert_cmpuint(table[offset + 2], ==, 0x11);
             g_assert_cmphex((uint32_t)ldl_le_p(table + offset + 4), ==,
                             0xfec00000);
@@ -177,8 +181,10 @@ static void test_pc9821_smp_mptable(void)
             uint8_t interrupt_type = table[offset + 1];
             uint16_t flags = lduw_le_p(table + offset + 2);
             uint8_t source_irq = table[offset + 5];
+            uint8_t destination_apic = table[offset + 6];
             uint8_t destination_irq = table[offset + 7];
 
+            g_assert_cmpuint(destination_apic, ==, expected_ioapic_id);
             if (interrupt_type == 0) {
                 g_assert_cmpuint(source_irq, !=, 7);
                 g_assert_cmpuint(destination_irq, ==,
@@ -198,7 +204,7 @@ static void test_pc9821_smp_mptable(void)
         entries++;
     }
     g_assert_cmpuint(offset, ==, length);
-    g_assert_cmpuint(processors, ==, 4);
+    g_assert_cmpuint(processors, ==, expected_processors);
     g_assert_cmpuint(buses, ==, 2);
     g_assert_cmpuint(ioapics, ==, 1);
     g_assert_cmpuint(io_interrupts, ==, 16);
@@ -206,12 +212,37 @@ static void test_pc9821_smp_mptable(void)
 
     qtest_writel(qts, 0xfec00000, 0);
     g_assert_cmphex((qtest_readl(qts, 0xfec00010) >> 24) & 0xf, ==,
-                    PC98_IOAPIC_ID);
+                    expected_ioapic_id);
     qtest_writel(qts, 0xfec00000, 1);
     g_assert_cmphex(qtest_readl(qts, 0xfec00010) & 0xff, ==, 0x11);
     g_assert_false(qtest_qom_get_bool(qts, "/machine/ioapic",
                                       "irq0-to-gsi2"));
+
+    qtest_system_reset(qts);
+    qtest_writel(qts, 0xfec00000, 0);
+    g_assert_cmphex((qtest_readl(qts, 0xfec00010) >> 24) & 0xf, ==,
+                    expected_ioapic_id);
     qtest_quit(qts);
+}
+
+static void test_pc9821_smp_mptable_2(void)
+{
+    test_pc9821_smp_mptable_count(2);
+}
+
+static void test_pc9821_smp_mptable_3(void)
+{
+    test_pc9821_smp_mptable_count(3);
+}
+
+static void test_pc9821_smp_mptable(void)
+{
+    test_pc9821_smp_mptable_count(4);
+}
+
+static void test_pc9821_smp_mptable_8(void)
+{
+    test_pc9821_smp_mptable_count(8);
 }
 
 static void test_pc9821_timestamp_byte_access(void)
@@ -1469,8 +1500,14 @@ int main(int argc, char **argv)
                    test_pc9801_low_memory_workarea);
     qtest_add_func("/pc98/pc9821/pegc-selection",
                    test_pc9821_pegc_selection);
+    qtest_add_func("/pc98/pc9821/smp-mptable-2",
+                   test_pc9821_smp_mptable_2);
+    qtest_add_func("/pc98/pc9821/smp-mptable-3",
+                   test_pc9821_smp_mptable_3);
     qtest_add_func("/pc98/pc9821/smp-mptable",
                    test_pc9821_smp_mptable);
+    qtest_add_func("/pc98/pc9821/smp-mptable-8",
+                   test_pc9821_smp_mptable_8);
     qtest_add_func("/pc98/pc9821/timestamp-byte-access",
                    test_pc9821_timestamp_byte_access);
     qtest_add_func("/pc98/pc9821/smp-a20-gate",

@@ -29,7 +29,6 @@ typedef struct Pc98VgaRegions {
 
 typedef struct Pc98MemState Pc98MemState;
 
-#define PC98_IOAPIC_ID          4
 #define PC98_IOAPIC_EXTINT_PIN 15
 #define PC98_MP_FLOAT_ADDR      0x000f4c40
 #define PC98_MP_CONFIG_ADDR     0x000f4c50
@@ -55,7 +54,8 @@ void pc98_mem_set_bios_probe_write(void *opaque, bool enable);
 void pc98_mem_set_a20_wrap(void *opaque, bool wrap);
 
 /* Install the QEMU-generated Intel MPS tables in the free BIOS reserve. */
-void pc98_mem_install_mptable(Pc98MemState *s, Error **errp);
+void pc98_mem_install_mptable(Pc98MemState *s, uint8_t ioapic_id,
+                               Error **errp);
 
 /* Give the PCI host bridge the memory-controller state for reg 0x64. */
 void pc98_pci_set_d000_mem(void *mem);

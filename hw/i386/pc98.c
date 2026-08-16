@@ -96,6 +96,8 @@
  * The PIT counter clock is 2457600 Hz; see hw/timer/i8254-pc98.c.
  */
 
+#define PC98_LEGACY_IOAPIC_ID 4
+
 struct Pc98MachineState {
     X86MachineState parent;
 
@@ -105,6 +107,7 @@ struct Pc98MachineState {
     Pc98IdeState *ide;
     DeviceState *ioapic;
     uint8_t shutdown_index;
+    uint8_t ioapic_id;
     bool pegc_enabled;
     bool smp_enabled;
 
@@ -345,7 +348,7 @@ static void pc98_smp_ioapic_init(Pc98MachineState *pms,
     qdev_prop_set_bit(dev, "irq0-to-gsi2", false);
     sysbus_realize_and_unref(sbd, &error_fatal);
     sysbus_mmio_map(sbd, 0, IO_APIC_DEFAULT_ADDRESS);
-    IOAPIC_COMMON(dev)->id = PC98_IOAPIC_ID;
+    IOAPIC_COMMON(dev)->id = pms->ioapic_id;
     pms->ioapic = dev;
     x86ms->ioapic_as = &address_space_memory;
 
@@ -480,7 +483,8 @@ static void pc98_devices_init(Pc98MachineState *pms)
                               pms->pegc_enabled,
                               pc98_vga_select_ems, pms->vga);
     if (pms->smp_enabled) {
-        pc98_mem_install_mptable(pms->mem, &error_fatal);
+        pc98_mem_install_mptable(pms->mem, pms->ioapic_id,
+                                  &error_fatal);
     }
 
     /*
@@ -589,6 +593,7 @@ static void pc98_machine_state_init(MachineState *machine)
 
     pms->smp_enabled = machine->smp.cpus > 1;
     if (pms->smp_enabled) {
+        uint32_t next_apic_id = 0;
         CPUState *cs;
 
         if (!pmc->supports_smp) {
@@ -607,12 +612,18 @@ static void pc98_machine_state_init(MachineState *machine)
                              "CPU with APIC support");
                 exit(1);
             }
-            if (cpu->apic_id >= PC98_IOAPIC_ID) {
-                error_report("pc9821 SMP CPU APIC ID %u conflicts with "
-                             "the I/O APIC ID", cpu->apic_id);
+            if (cpu->apic_id >= IOAPIC_ID_MASK) {
+                error_report("pc9821 SMP CPU APIC ID %u leaves no unique "
+                             "4-bit I/O APIC ID", cpu->apic_id);
                 exit(1);
             }
+            next_apic_id = MAX(next_apic_id, cpu->apic_id + 1);
         }
+        /*
+         * Preserve the original ID 4 for the existing 2--4 CPU machine ABI.
+         * Above four CPUs, MPS requires the first unused APIC ID.
+         */
+        pms->ioapic_id = MAX(PC98_LEGACY_IOAPIC_ID, next_apic_id);
     }
 
     pc98_devices_init(pms);
@@ -640,7 +651,7 @@ static void pc98_machine_reset(MachineState *machine, ResetType type)
         }
     }
     if (pms->smp_enabled) {
-        IOAPIC_COMMON(pms->ioapic)->id = PC98_IOAPIC_ID;
+        IOAPIC_COMMON(pms->ioapic)->id = pms->ioapic_id;
     }
 }
 
@@ -725,7 +736,7 @@ static void pc9821_class_init(ObjectClass *oc, const void *data)
     Pc98MachineClass *pmc = PC98_MACHINE_CLASS(oc);
 
     mc->desc = "NEC PC-9821";
-    mc->max_cpus = 4;
+    mc->max_cpus = 8;
     pmc->has_pci = true;
     pmc->has_wab = false;
     pmc->has_coregraph = true;

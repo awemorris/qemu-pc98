@@ -1065,7 +1065,8 @@ static Pc98MpInterrupt *pc98_mp_add_interrupt(uint8_t **entry,
     return interrupt;
 }
 
-void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
+void pc98_mem_install_mptable(Pc98MemState *s, uint8_t ioapic_id,
+                               Error **errp)
 {
     uint8_t image[PC98_MP_RESERVE_SIZE] = { 0 };
     Pc98MpFloating *floating = (Pc98MpFloating *)image;
@@ -1125,8 +1126,8 @@ void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
         processor_count++;
         entry_count++;
     }
-    if (processor_count < 2 || processor_count > 4) {
-        error_setg(errp, "PC-98 MPS table requires 2 to 4 processors");
+    if (processor_count < 2 || processor_count > 8) {
+        error_setg(errp, "PC-98 MPS table requires 2 to 8 processors");
         return;
     }
 
@@ -1144,7 +1145,7 @@ void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
 
         entry += sizeof(*ioapic);
         ioapic->type = 2;
-        ioapic->id = PC98_IOAPIC_ID;
+        ioapic->id = ioapic_id;
         ioapic->version = 0x11;
         ioapic->flags = 1;
         ioapic->address = cpu_to_le32(0xfec00000);
@@ -1165,11 +1166,11 @@ void pc98_mem_install_mptable(Pc98MemState *s, Error **errp)
         pin = irq < 7 ? irq : irq - 1;
         flags = irq == 14 ? 0x000d : 0x0005;
         pc98_mp_add_interrupt(&entry, 3, 0, flags, irq,
-                              PC98_IOAPIC_ID, pin);
+                              ioapic_id, pin);
         entry_count++;
     }
     pc98_mp_add_interrupt(&entry, 3, 3, 0x0005, 0,
-                          PC98_IOAPIC_ID, PC98_IOAPIC_EXTINT_PIN);
+                          ioapic_id, PC98_IOAPIC_EXTINT_PIN);
     entry_count++;
     pc98_mp_add_interrupt(&entry, 4, 3, 0x0005, 0,
                           X86_CPU(first_cpu)->apic_id, 0);
