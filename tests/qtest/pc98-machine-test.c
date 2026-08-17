@@ -459,6 +459,34 @@ static void test_pc9821_pegc_selection(void)
 {
     QTestState *qts;
 
+    /*
+     * The stock-ROM POST compatibility path exposes the same physical PEGC
+     * framebuffer at both of the real machine's linear apertures.
+     */
+    qts = qtest_init(
+        "-machine pc9821 -m 16M -nodefaults -display none");
+    qtest_outb(qts, PC98_MODE_FF2, 0x07);
+    qtest_outb(qts, PC98_MODE_FF2, 0x21);
+    qtest_outb(qts, PC98_MODE_STATUS, 0x0a);
+    qtest_writew(qts, PC98_PEGC_CONTROL + 0x102, 1);
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0x11);
+    qtest_writeb(qts, PC98_PEGC_APERTURE + 0x3ffff, 0x22);
+    qtest_writeb(qts, PC98_PEGC_APERTURE + 0x7ffff, 0x33);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_HIGH_ALIAS), ==, 0x11);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_HIGH_ALIAS + 0x3ffff),
+                    ==, 0x22);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_HIGH_ALIAS + 0x7ffff),
+                    ==, 0x33);
+    qtest_writeb(qts, PC98_PEGC_HIGH_ALIAS + 1, 0x44);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + 1), ==, 0x44);
+
+    /* Releasing 15--16 MiB as RAM must hide both framebuffer apertures. */
+    qtest_outb(qts, PC98_SYS16M_CTRL, 0x04);
+    qtest_writeb(qts, PC98_PEGC_APERTURE, 0x77);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0x77);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_HIGH_ALIAS), !=, 0x77);
+    qtest_quit(qts);
+
     /* PEGC is opt-in: the default releases 15--16 MiB as ordinary RAM. */
     qts = qtest_init(
         "-machine pc9821 -m 16M -nodefaults -display none");
@@ -490,6 +518,12 @@ static void test_pc9821_pegc_selection(void)
     g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE), ==, 0xa5);
     qtest_writeb(qts, PC98_PEGC_HIGH_ALIAS + 1, 0x3c);
     g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + 1), ==, 0x3c);
+    qtest_writeb(qts, PC98_PEGC_APERTURE + 0x3ffff, 0x5a);
+    qtest_writeb(qts, PC98_PEGC_HIGH_ALIAS + 0x7ffff, 0xc3);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_HIGH_ALIAS + 0x3ffff),
+                    ==, 0x5a);
+    g_assert_cmphex(qtest_readb(qts, PC98_PEGC_APERTURE + 0x7ffff),
+                    ==, 0xc3);
 
     qtest_outb(qts, PC98_MODE_FF2, 0x69);
     qtest_outb(qts, PC98_MODE_STATUS, 0x0d);

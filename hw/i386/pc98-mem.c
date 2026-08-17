@@ -1520,10 +1520,12 @@ Pc98MemState *pc98_mem_init(MemoryRegion *system_memory,
                                             s->pegc_post, 1);
         memory_region_set_enabled(s->pegc_post, s->sys16m);
     }
-    if (s->pegc_enabled) {
+    if (s->pegc_post_compat || s->pegc_enabled) {
         /*
-         * 32-bit PC-9821 software, including Windows NT setup, uses the
-         * always-present top-of-address-space alias of the linear PEGC VRAM.
+         * Real PC-9821 hardware decodes the same 512 KiB linear PEGC VRAM at
+         * both 0x00f00000 and 0xfff00000.  Keep the high alias present for
+         * the stock-ROM POST compatibility path as well as full PEGC; access
+         * visibility is enforced by the shared target region.
          */
         memory_region_init_alias(&s->pegc_high, NULL, "pc98.pegc-high",
                                  s->pegc_post, 0, 0x80000);
