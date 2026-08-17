@@ -35,6 +35,7 @@
 #define COREGRAPH_BLT_RESET       0x04
 #define COREGRAPH_BLT_START       0x02
 #define COREGRAPH_BLT_SOLID_BRUSH 0xc0
+#define COREGRAPH_BLT_PIXEL_WIDTH_MASK 0x30
 
 typedef struct Pc98CoreGraphState {
     PCIDevice parent_obj;
@@ -372,9 +373,11 @@ static bool coregraph_begin_solid_brush(Pc98CoreGraphState *s,
 {
     CirrusVGAState *c = &s->cirrus;
     uint32_t addr;
+    uint32_t pattern_size;
     int i;
 
-    if (c->vga.gr[0x30] != COREGRAPH_BLT_SOLID_BRUSH) {
+    if ((c->vga.gr[0x30] & ~COREGRAPH_BLT_PIXEL_WIDTH_MASK) !=
+        COREGRAPH_BLT_SOLID_BRUSH) {
         return false;
     }
 
@@ -383,11 +386,22 @@ static bool coregraph_begin_solid_brush(Pc98CoreGraphState *s,
            (c->vga.gr[0x2e] << 16);
     addr &= c->cirrus_addr_mask;
 
-    /*
-     * The reusable core aligns an 8-bpp video-memory pattern to 64 bytes
-     * before reading its eight monochrome rows.
-     */
-    addr &= ~63U;
+    /* Match the reusable core's video-memory pattern alignment. */
+    switch (c->vga.get_bpp(&c->vga)) {
+    case 8:
+        pattern_size = 64;
+        break;
+    case 15:
+    case 16:
+        pattern_size = 128;
+        break;
+    case 24:
+    case 32:
+    default:
+        pattern_size = 256;
+        break;
+    }
+    addr &= ~(pattern_size - 1);
     if (addr + 8 > c->real_vram_size) {
         return false;
     }

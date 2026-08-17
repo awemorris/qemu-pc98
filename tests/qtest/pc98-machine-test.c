@@ -103,6 +103,13 @@
 #define PC98_A20_LATCH_PORT    0x00f2
 #define PC98_A20_COMMAND_PORT  0x00f6
 
+#define PC98_COREGRAPH_CONTROL_INDEX 0x0faa
+#define PC98_COREGRAPH_CONTROL_DATA  0x0fab
+#define PC98_COREGRAPH_SEQ_INDEX     0x0ca4
+#define PC98_COREGRAPH_SEQ_DATA      0x0ca5
+#define PC98_COREGRAPH_LFB_BASE      0xf0000000ULL
+#define PC98_COREGRAPH_MMIO_BASE     0xf03fff00ULL
+
 #define PC98_PCM_CLOCK_PORT   0xa466
 #define PC98_PCM_FIFO_PORT    0xa468
 
@@ -380,6 +387,45 @@ static void test_pc9821_coregraph_off(void)
 
     g_assert_nonnull(strstr(qtree, "dev: pc98-pcihost"));
     g_assert_null(strstr(qtree, "dev: pc98-coregraph"));
+}
+
+static void test_pc9821_coregraph_solid_brush_16bpp(void)
+{
+    QTestState *qts = qtest_init("-machine pc9821 -m 64M "
+                                 "-nodefaults -display none");
+    uint8_t clear[128] = { 0 };
+
+    /* Select the Windows 2000 Core-Graph linear and BitBLT MMIO windows. */
+    qtest_outb(qts, PC98_COREGRAPH_CONTROL_INDEX, 2);
+    qtest_outb(qts, PC98_COREGRAPH_CONTROL_DATA, 0xf0);
+    qtest_outb(qts, PC98_COREGRAPH_SEQ_INDEX, 0x17);
+    qtest_outb(qts, PC98_COREGRAPH_SEQ_DATA, 0x44);
+
+    /*
+     * Core-Graph treats an all-zero monochrome pattern as a solid foreground
+     * brush.  Windows 2000 sets the 16-bpp pixel-width bit in BLTMODE, so the
+     * board-specific handling must not depend on an exact 0xc0 mode value.
+     */
+    qtest_memwrite(qts, PC98_COREGRAPH_LFB_BASE + 0x100,
+                   clear, sizeof(clear));
+    qtest_writeb(qts, PC98_COREGRAPH_LFB_BASE + 0x200, 0xaa);
+    qtest_writeb(qts, PC98_COREGRAPH_LFB_BASE + 0x201, 0xaa);
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x04, 0x34); /* FG low */
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x05, 0x12); /* FG high */
+    qtest_writew(qts, PC98_COREGRAPH_MMIO_BASE + 0x08, 1); /* 2 bytes */
+    qtest_writew(qts, PC98_COREGRAPH_MMIO_BASE + 0x0a, 0); /* 1 row */
+    qtest_writew(qts, PC98_COREGRAPH_MMIO_BASE + 0x0c, 2);
+    qtest_writel(qts, PC98_COREGRAPH_MMIO_BASE + 0x10, 0x200);
+    qtest_writel(qts, PC98_COREGRAPH_MMIO_BASE + 0x14, 0x100);
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x18, 0xd0);
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x1a, 0x0d); /* copy */
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x1b, 0);
+    qtest_writeb(qts, PC98_COREGRAPH_MMIO_BASE + 0x40, 0x02); /* start */
+
+    g_assert_cmphex(qtest_readw(qts, PC98_COREGRAPH_LFB_BASE + 0x200),
+                    ==, 0x1234);
+    g_assert_cmphex(qtest_readb(qts, PC98_COREGRAPH_LFB_BASE + 0x100), ==, 0);
+    qtest_quit(qts);
 }
 
 static void test_pc9801_low_memory_workarea(void)
@@ -1605,6 +1651,8 @@ int main(int argc, char **argv)
                    test_pc9821_has_pci_coregraph);
     qtest_add_func("/pc98/pc9821/coregraph-off",
                    test_pc9821_coregraph_off);
+    qtest_add_func("/pc98/pc9821/coregraph-solid-brush-16bpp",
+                   test_pc9821_coregraph_solid_brush_16bpp);
     qtest_add_func("/pc98/pc9801/low-memory-workarea",
                    test_pc9801_low_memory_workarea);
     qtest_add_func("/pc98/pc9821/pegc-selection",

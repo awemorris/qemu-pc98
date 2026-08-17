@@ -9,7 +9,7 @@
  * Copyright (c) 2026 Awe Morris
  *
  * The register semantics and the shifter/ROP corrections in this port are
- * based on the SL9821 PEGC hardware analysis by Tomomi Sakai:
+ * based on the SL9821 PEGC hardware analysis published by satotomi:
  * https://www.satotomi.com/sl9821/sl9821_tec5.html
  *
  * SPDX-License-Identifier: BSD-3-Clause
