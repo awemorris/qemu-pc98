@@ -331,9 +331,12 @@ int1b_hook:
  * DS +10, IP +12, CS +14, FLAGS +16.
  */
 int1b_entry:
-	incb	WA_BUSY
+	pushl	%eax
+	pushl	%ecx
+	pushl	%edx
 	xorw	%ax, %ax
 	movw	%ax, %ds
+	incb	WA_BUSY
 	movb	0(%bp), %al
 	andb	$0x07, %al
 	movb	%al, WA_SCSI_TARGET
@@ -399,7 +402,12 @@ int1b_finish:
 	jb	1f
 	orb	$0x01, 0x16(%bp)
 1:
+	xorw	%ax, %ax
+	movw	%ax, %ds
 	decb	WA_BUSY
+	popl	%edx
+	popl	%ecx
+	popl	%eax
 	popw	%ax
 	popw	%bx
 	popw	%cx
