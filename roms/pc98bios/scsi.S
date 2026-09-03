@@ -566,13 +566,12 @@ scsi_read10:
 	popw	%cx
 	popw	%bx
 	testw	$1, %ax
-	jnz	1f
 	popl	%eax
+	jnz	1f
 	xorb	%ah, %ah
 	clc
 	ret
 1:
-	popl	%eax
 	movb	$0x80, %ah
 	stc
 	ret
@@ -618,13 +617,12 @@ scsi_write10:
 	popw	%cx
 	popw	%bx
 	testw	$1, %ax
-	jnz	1f
 	popl	%eax
+	jnz	1f
 	xorb	%ah, %ah
 	clc
 	ret
 1:
-	popl	%eax
 	movb	$0x80, %ah
 	stc
 	ret
