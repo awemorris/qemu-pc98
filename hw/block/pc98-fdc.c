@@ -187,6 +187,8 @@ struct FDCtrl {
     uint8_t pc98;
     uint8_t pc98_force_ready;
     uint8_t pc98_dma_enabled;
+    /* SPECIFY explicitly selected DMA mode (ND=0) */
+    uint8_t pc98_specify_dma;
     uint8_t pc98_status0[4];
     uint8_t pc98_pcn[4];
 };
@@ -1660,6 +1662,20 @@ static void fdctrl_stop_transfer(FDCtrl *fdctrl, uint8_t status0,
     fdctrl_raise_irq(fdctrl);
 }
 
+/*
+ * Decide whether a PC-98 data command uses DMA.  Software selects DMA either
+ * through the control-register DMA bit at 0x94 or by issuing SPECIFY with
+ * ND=0.  NEC's own BIOS takes the latter route: it leaves bit 4 of 0x94
+ * clear, programs DMA channel 2, sends SPECIFY with ND=0, and then waits for
+ * the completion interrupt.  Running that command as polled PIO makes its
+ * interrupt handler read the sector data as result bytes, so every IPL read
+ * fails and the BIOS falls back to ROM BASIC.
+ */
+static bool pc98fdc_dma_mode(FDCtrl *fdctrl)
+{
+    return fdctrl->pc98_dma_enabled || fdctrl->pc98_specify_dma;
+}
+
 /* Prepare a data transfer (either DMA or FIFO) */
 static void fdctrl_start_transfer(FDCtrl *fdctrl, int direction)
 {
@@ -1730,6 +1746,18 @@ static void fdctrl_start_transfer(FDCtrl *fdctrl, int direction)
         int tmp;
         fdctrl->data_len = 128 << (fdctrl->fifo[5] > 7 ? 7 : fdctrl->fifo[5]);
         tmp = (fdctrl->fifo[6] - ks + 1);
+        if (fdctrl->pc98 && pc98fdc_dma_mode(fdctrl) && tmp <= 0) {
+            /*
+             * NEC's BIOS reads the 1024-byte IPL sector with EOT=0 and
+             * relies on the DMA terminal count to end the command.  A
+             * uPD765A only matches EOT after R reaches it, so the transfer
+             * may run to the end of the track; the DMA count stops it.
+             */
+            tmp = cur_drv->last_sect - ks + 1;
+            if (tmp <= 0) {
+                tmp = 1;
+            }
+        }
         if (tmp < 0) {
             FLOPPY_DPRINTF("invalid EOT: %d\n", tmp);
             fdctrl_stop_transfer(fdctrl, FD_SR0_ABNTERM, FD_SR1_MA, 0x00);
@@ -1745,7 +1773,7 @@ static void fdctrl_start_transfer(FDCtrl *fdctrl, int direction)
          * caller's one-sector buffer.  DMA, on the other hand, must retain
          * the normal uPD765 R-through-EOT transfer length.
          */
-        if (fdctrl->pc98 && !fdctrl->pc98_dma_enabled) {
+        if (fdctrl->pc98 && !pc98fdc_dma_mode(fdctrl)) {
             tmp = 1;
         } else if (fdctrl->fifo[0] & 0x80) {
             tmp += fdctrl->fifo[6];
@@ -1754,7 +1782,7 @@ static void fdctrl_start_transfer(FDCtrl *fdctrl, int direction)
     }
     fdctrl->eot = fdctrl->fifo[6];
     if ((fdctrl->dor & FD_DOR_DMAEN) &&
-        (!fdctrl->pc98 || fdctrl->pc98_dma_enabled)) {
+        (!fdctrl->pc98 || pc98fdc_dma_mode(fdctrl))) {
         /* DMA transfer is enabled. */
         IsaDmaClass *k = ISADMA_GET_CLASS(fdctrl->dma);
 
@@ -2218,6 +2246,7 @@ static void fdctrl_handle_specify(FDCtrl *fdctrl, int direction)
         fdctrl->dor &= ~FD_DOR_DMAEN;
     else
         fdctrl->dor |= FD_DOR_DMAEN;
+    fdctrl->pc98_specify_dma = !(fdctrl->fifo[2] & 1);
     /* No result back */
     fdctrl_to_command_phase(fdctrl);
 }
@@ -2945,6 +2974,7 @@ static void pc98_fdc_setup_interface(Pc98FdcState *isa)
     fdctrl->pc98 = 1;
     fdctrl->pc98_force_ready = 0;
     fdctrl->pc98_dma_enabled = 0;
+    fdctrl->pc98_specify_dma = 0;
     fdctrl->irq = isa->irq11;
     fdctrl->dma_chann = 2;
     fdctrl->dor |= FD_DOR_DMAEN;
@@ -3036,7 +3066,7 @@ static int pc98_fdc_post_load(void *opaque, int version_id)
 
 static const VMStateDescription vmstate_pc98_fdc_dev = {
     .name = "pc98-fdc",
-    .version_id = 4,
+    .version_id = 5,
     .minimum_version_id = 2,
     .post_load = pc98_fdc_post_load,
     .fields = (const VMStateField[]) {
@@ -3045,6 +3075,7 @@ static const VMStateDescription vmstate_pc98_fdc_dev = {
         VMSTATE_UINT8_V(mode_reg, Pc98FdcState, 3),
         VMSTATE_UINT8_V(mode144_reg, Pc98FdcState, 3),
         VMSTATE_UINT8_V(ctrl_reg, Pc98FdcState, 4),
+        VMSTATE_UINT8_V(state.pc98_specify_dma, Pc98FdcState, 5),
         VMSTATE_END_OF_LIST()
     }
 };
