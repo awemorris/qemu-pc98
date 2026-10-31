@@ -275,6 +275,20 @@ cold_start:
 	 * 0A460h/0188h.
 	 */
 	movb	$0x00, 0x05b3
+	/*
+	 * Mask the three 8251 interrupt sources (port C bits 0-2: RXRDY,
+	 * TXEMPTY, TXRDY).  The system PPI's port C comes out of reset with
+	 * every bit set, which leaves IRQ 4 asserted by the idle transmitter.
+	 * The 8259 is edge-triggered, so a driver that only enables RXRDY
+	 * (ELKS rs_open() does a read-modify-write of port C) would then never
+	 * see an edge for received characters.
+	 */
+	movb	$0x00, %al		/* port C bit 0 reset: RXRDY */
+	outb	%al, $0x37
+	movb	$0x02, %al		/* port C bit 1 reset: TXEMPTY */
+	outb	%al, $0x37
+	movb	$0x04, %al		/* port C bit 2 reset: TXRDY */
+	outb	%al, $0x37
 	call	keyboard_init
 	call	crt_init
 	call	dma_init
@@ -2916,6 +2930,7 @@ fdd_boot:
 	movb	$2, %bh
 	movw	$0x0012, %dx		/* probe C=0, H=0, R=18 */
 	movw	$512, %cx
+	movw	%cx, %si		/* bytes to store */
 	movb	$18, %ah
 	call	fdd_read_one
 	jnc	fdd_boot_144m
@@ -2931,6 +2946,7 @@ fdd_boot:
 	movb	$2, %bh
 	movw	$0x0001, %dx
 	movw	$512, %cx
+	movw	%cx, %si		/* bytes to store */
 	movb	$15, %ah
 	call	fdd_read_one
 	jc	fdd_boot_failed
@@ -2948,6 +2964,7 @@ fdd_boot:
 	movb	$3, %bh
 	movw	$0x0001, %dx
 	movw	$1024, %cx
+	movw	%cx, %si		/* bytes to store */
 	movb	$8, %ah
 	call	fdd_read_one
 	jc	fdd_boot_failed
@@ -2973,6 +2990,7 @@ fdd_boot_144m:
 	movb	$2, %bh
 	movw	$0x0001, %dx
 	movw	$512, %cx
+	movw	%cx, %si		/* bytes to store */
 	movb	$18, %ah
 	call	fdd_read_one
 	jc	fdd_boot_failed
